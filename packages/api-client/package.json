@@ -1,0 +1,16 @@
+{
+  "name": "@nimbusdb/api-client",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TypeScript types and client for the NimbusDB API, generated from api/openapi.yaml (spec-first, ADR-012). Do not edit generated files by hand.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "generate": "openapi-typescript ../../api/openapi.yaml -o ./src/schema.d.ts"
+  },
+  "devDependencies": {
+    "openapi-typescript": "^7.6.0",
+    "typescript": "^5.7.0"
+  }
+}

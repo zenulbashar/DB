@@ -1,0 +1,22 @@
+# ArgoCD app-of-apps for a NimbusDB cell (DEPLOYMENT_ARCHITECTURE §4).
+# Bootstrap (once per cell, after terraform):
+#   kubectl apply -n argocd -f app-of-apps.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: nimbusdb-platform
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/zenulbashar/DB
+    targetRevision: main
+    path: deploy/k8s/overlays/prod-syd1-a
+  destination:
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true # manual cluster changes are drift; revert them
+    syncOptions:
+      - CreateNamespace=true

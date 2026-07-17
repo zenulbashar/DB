@@ -1,0 +1,23 @@
+# Local development stack (control plane only — the data plane needs a kind cluster,
+# see tools/dev-up.sh). Port 5433 to avoid clashing with a host Postgres.
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      - cpdb:/var/lib/postgresql/data
+      # Creates the non-superuser app role; the control plane refuses to run
+      # as a role that bypasses RLS.
+      - ./tools/pg-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nimbusdb -d nimbusdb_cp"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  cpdb:

@@ -47,6 +47,10 @@
 
 - Org-scoped RBAC (roles in MULTI_TENANCY §4) enforced in the API layer; repository layer
   injects `org_id`; Postgres RLS as second net on the control-plane DB.
+- **The control-plane DB role must be `NOSUPERUSER NOBYPASSRLS`** — superusers silently bypass
+  RLS, deleting the second net. Enforced at startup: the API refuses to boot if its role would
+  bypass RLS (found by the Phase 1 integration suite; local dev/tests provision a dedicated
+  non-superuser role, and CNPG's default app users satisfy this in production).
 - Tenant Postgres: tenants own their roles inside their branch only; role creation flows through
   the API so grants stay auditable; no `SUPERUSER`, `pg_execute_server_program`,
   `pg_read/write_server_files` ever granted.
@@ -68,9 +72,11 @@ cert-manager-automated; API keys support expiry.
 
 ## 6. Audit & logging
 
-- `audit_log` (control plane): append-only (no UPDATE/DELETE grants; retention ≥ 1 year),
-  covering all mutations, credential reveals, SQL-editor executions, admin-portal actions,
-  break-glass events. Tenant-visible via `GET /orgs/{org}/audit-log`.
+- `audit_log` (control plane): append-only (no UPDATE/DELETE RLS policies exist, so rows are
+  immutable even to the app role; retention ≥ 1 year), covering all mutations, credential
+  reveals, SQL-editor executions, admin-portal actions, break-glass events. Tenant-visible via
+  `GET /orgs/{org}/audit-log`. Phase 1 writes audit entries post-commit (best-effort, logged on
+  failure); Phase 2 moves them into the mutation transaction.
 - Platform logs (Loki): structured, tenant-data-free by policy + scrubbing middleware; 30–90 day
   retention by stream.
 - Postgres logs for tenant branches: available to the owning tenant (console log viewer,

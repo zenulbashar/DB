@@ -1,0 +1,111 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      go: ${{ steps.filter.outputs.go }}
+      console: ${{ steps.filter.outputs.console }}
+      api: ${{ steps.filter.outputs.api }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            go:
+              - 'services/**'
+              - '.github/workflows/ci.yml'
+            console:
+              - 'console/**'
+              - 'packages/api-client/**'
+              - '.github/workflows/ci.yml'
+            api:
+              - 'api/**'
+              - 'packages/api-client/**'
+              - '.github/workflows/ci.yml'
+
+  control-plane:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: nimbusdb_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    defaults:
+      run:
+        working-directory: services/control-plane
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: services/control-plane/go.mod
+          cache-dependency-path: services/control-plane/go.sum
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
+      - name: vet
+        run: go vet ./...
+      - name: unit tests
+        run: go test -count=1 ./...
+      - name: integration tests
+        env:
+          # The harness provisions its own non-superuser role from this admin URL.
+          TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/nimbusdb_test?sslmode=disable
+        run: go test -count=1 -tags=integration ./internal/store/postgres/...
+      - name: build
+        run: go build ./...
+
+  console:
+    needs: changes
+    if: needs.changes.outputs.console == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: console
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: console/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+
+  api-contract:
+    needs: changes
+    if: needs.changes.outputs.api == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: OpenAPI lint
+        run: npx --yes @redocly/cli@latest lint api/openapi.yaml
+      - name: Generated client is in sync with the spec
+        working-directory: packages/api-client
+        run: |
+          npm ci
+          npm run generate
+          git diff --exit-code src/schema.d.ts \
+            || (echo "::error::api-client is stale — run 'make generate' and commit"; exit 1)
+          npx tsc --noEmit
