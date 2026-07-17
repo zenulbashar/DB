@@ -15,7 +15,7 @@
 - Monorepo scaffold per MASTER plan §4; Go workspace; Next.js console shell; CI (GitHub Actions: lint, typecheck, unit tests, build; path-filtered).
 - Local dev environment: `kind` cluster bootstrap script with CNPG + Cilium + Traefik installed; docker-compose fallback for pure-API work.
 - `api/openapi.yaml` v1 skeleton (orgs, projects, api-keys, auth) + generated TS client.
-- Control-plane API: health, authn (console session + `ndb_` API keys), org/user/member CRUD, API key issuance/revocation, audit-log writes; control-plane Postgres with migrations; RLS + repository-layer scoping.
+- Control-plane API: health, authn (`ndb_` API keys + one-time bootstrap flow; console sessions arrive with the console in Phase 3 — ADR-013), org/user/member CRUD, API key issuance/revocation, project records CRUD, audit-log writes; control-plane Postgres with migrations; RLS + repository-layer scoping.
 - ArgoCD app-of-apps skeleton; Terraform module skeleton for the `syd1` substrate (ADR-005 decides the substrate at this point).
 
 **Acceptance**
@@ -39,7 +39,8 @@
 ## Phase 3 — Console v1 & developer surface
 
 **Scope**
-- Console: auth, org/project dashboards, connection-string panel (copy variants for `pg`, Drizzle, Prisma, psql), role management UI, branch list, metrics dashboards (Prometheus-backed), audit-log viewer, API-key management, secrets/connection-string rotation flows.
+- Console auth: email magic-link sessions (+ the SECURITY_MODEL §3 session semantics; ADR-013 moved this here from Phase 1).
+- Console: org/project dashboards, connection-string panel (copy variants for `pg`, Drizzle, Prisma, psql), role management UI, branch list, metrics dashboards (Prometheus-backed), audit-log viewer, API-key management, secrets/connection-string rotation flows.
 - SQL editor (CodeMirror 6) with per-branch scoped execution through a control-plane proxy endpoint (short-lived credentials, statement timeout, result-size caps) — never direct browser→DB.
 - Database import/export v1: `pg_dump` download / upload-and-restore into a branch (size-bounded; large imports arrive in Phase 5).
 - Design system per DESIGN_SYSTEM_MAPPING.md (token layer + primitives).

@@ -1,6 +1,6 @@
 # Master Implementation Plan — NimbusDB
 
-**Status:** Draft for approval — v0.1 (Phase 0 deliverable)
+**Status:** **Approved v1.0** (owner sign-off 2026-07-17; see DECISION_LOG for answered questions)
 **Owner:** CTO / Principal Architecture Group
 **Last updated:** 2026-07-17
 **Repository:** `zenulbashar/DB` (platform monorepo)
@@ -178,6 +178,7 @@ Per the implementation strategy, each phase must, before merging its final PR:
 
 ## 9. Approval
 
-Implementation (Phase 1) does **not** begin until the owner has reviewed this document set.
-Open questions requiring owner input are collected in DECISION_LOG.md §"Open questions"
-(product name, cloud/hosting substrate, PG default version, billing processor).
+**Approved 2026-07-17.** The owner reviewed this document set and answered all open questions
+(DECISION_LOG.md §"Open questions"): name **NimbusDB** (provisional), substrate **managed k8s**
+(ADR-005), console design export **forthcoming** (interim system per DESIGN_SYSTEM_MAPPING §5),
+billing **Stripe**, migration order **Roster → Prompt2Eat**. Phase 1 is authorized.

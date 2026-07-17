@@ -6,17 +6,13 @@
 
 ## 1. Substrate
 
-**Decision pending final substrate pick (ADR-005, Phase 1):** the architecture is
-substrate-portable by construction — everything above the Kubernetes API is identical across
-options. Candidates for region `syd1` (ap-southeast-2), in current order of preference:
-
-1. **Managed k8s in an AU region of a major cloud** (EKS/AKS/GKE): fastest to production-grade
-   (managed control plane, EBS-class CSI with snapshots, KMS, S3). Highest unit cost.
-2. **Bare-metal/VM k8s (k3s/kubeadm + OpenEBS ZFS + MinIO) on AU providers or Sydney colo:**
-   materially cheaper at steady state, aligns with Nimbus's own colo ambitions
-   (`hosting/docs/INFRASTRUCTURE.md`), but all storage/backup/network competence is on us.
-3. **Hybrid:** cloud for launch (option 1), colo as a later cell (option 3 = 1 then 2) — the
-   cell model (MULTI_TENANCY §6) makes this a placement decision, not a migration.
+**Decided (ADR-005, owner-approved 2026-07-17): managed Kubernetes + cloud object storage/KMS**
+in `syd1` (ap-southeast-2) for launch. The architecture stays substrate-portable by
+construction — everything above the Kubernetes API is identical across options — so the
+bare-metal/Sydney-colo path (which aligns with Nimbus's own colo ambitions,
+`hosting/docs/INFRASTRUCTURE.md`) remains available as a **later cell** rather than a migration
+(MULTI_TENANCY §6). The concrete provider (EKS vs AKS vs GKE) is picked inside the Phase 1
+Terraform module on quota/pricing at bootstrap time.
 
 Requirements any substrate must meet: CSI snapshots + expansion, ≥ 2 AZs (or failure domains),
 S3-compatible object storage in-region, KMS or HSM-equivalent, L4 load balancer for the gateway.
