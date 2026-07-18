@@ -37,6 +37,7 @@ type Store struct {
 	roles       map[roleKey]domain.DBRole
 	roleSecrets map[roleKey][]byte
 	databases   map[dbKey]domain.Database
+	imports     map[string]domain.Import
 	audit       []domain.AuditEntry
 	idem        map[idemKey]idemEntry
 }
@@ -54,6 +55,7 @@ func New() *Store {
 		roles:       map[roleKey]domain.DBRole{},
 		roleSecrets: map[roleKey][]byte{},
 		databases:   map[dbKey]domain.Database{},
+		imports:     map[string]domain.Import{},
 		idem:        map[idemKey]idemEntry{},
 	}
 }

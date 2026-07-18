@@ -87,6 +87,22 @@ type CreateDBRoleParams struct {
 	Secret   SecretMaterial
 }
 
+type CreateImportParams struct {
+	OrgID          string
+	ProjectID      string
+	TargetBranchID *string
+	SourceKind     domain.ImportSourceKind
+	Mode           domain.ImportMode
+	SourceSecret   SecretMaterial // encrypted source connection string
+}
+
+type TransitionImportParams struct {
+	To          domain.ImportState
+	Report      map[string]any // set on preflight completion
+	Checkpoints map[string]any // merged shallowly over existing keys
+	Error       *string
+}
+
 type CreateBranchParams struct {
 	OrgID     string
 	ProjectID string
@@ -163,6 +179,15 @@ type Store interface {
 	CreateDatabase(ctx context.Context, orgID, branchID, name, ownerRoleName string) (*domain.Database, error)
 	ListDatabases(ctx context.Context, orgID, branchID string) ([]domain.Database, error)
 	DeleteDatabase(ctx context.Context, orgID, branchID, name string) error
+
+	// CreateImport stores the job with its source connection string as an
+	// envelope-encrypted secret (never returned by any read path).
+	CreateImport(ctx context.Context, p CreateImportParams) (*domain.Import, error)
+	GetImport(ctx context.Context, orgID, importID string) (*domain.Import, error)
+	ListImports(ctx context.Context, orgID, projectID string, pg Page) ([]domain.Import, string, error)
+	// TransitionImport enforces domain.CanTransition; illegal steps return
+	// ErrConflict. Checkpoints/report/error patches ride along atomically.
+	TransitionImport(ctx context.Context, orgID, importID string, p TransitionImportParams) (*domain.Import, error)
 
 	AppendAudit(ctx context.Context, e domain.AuditEntry) error
 	ListAudit(ctx context.Context, orgID string, pg Page) ([]domain.AuditEntry, string, error)

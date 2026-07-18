@@ -16,6 +16,20 @@ All notable changes to this repository. Format loosely follows [Keep a Changelog
 - Integration tests against real Postgres fixtures (enum + PK-less + serial tables);
   live CLI smoke verified against the local instance. CI job + Makefile added.
 
+### Added (imports resource + state machine, 2026-07-18)
+- Migration `0004`: `imports` table under FORCE-RLS; source connection URLs stored ONLY
+  as envelope-encrypted secrets (never returned by any read path — leak-tested).
+- Import lifecycle state machine in the domain layer (`CanTransition`): dump_restore
+  short-circuits `schema_copy → cutover_ready`, logical mode walks the full sync chain;
+  no skipping, no reversing, `cut_over` may fail but not abort, terminal states final —
+  enforced in the store under `FOR UPDATE` row locking.
+- API: `GET/POST /projects/{prj}/imports`, `GET /imports/{imp}`, human-gated
+  `POST /imports/{imp}/cutover`, `POST /imports/{imp}/abort`, and the runner-facing
+  `PATCH /imports/{imp}/state` (report/checkpoint patches ride transitions atomically).
+- OpenAPI + regenerated client; unit suites (transition matrix, full lifecycle over the
+  API incl. 409s on illegal steps and credential-leak checks) and Postgres integration
+  green.
+
 ### Added (logical-replication live-sync, 2026-07-18)
 - `internal/logicalrepl` (MIGRATION_STRATEGY §2 stages 4–5): publication + **explicitly
   created replication slot** + subscription with `create_slot = false` — automatic slot

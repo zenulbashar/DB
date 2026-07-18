@@ -76,6 +76,14 @@ func (s *Server) routes() {
 			r.Get("/branches", s.requireScope(domain.ScopeBranchesRead, s.handleListBranches))
 			r.Post("/branches", s.requireScope(domain.ScopeBranchesWrite, s.idempotent(s.handleCreateBranch)))
 			r.Get("/connection-uri", s.requireScope(domain.ScopeRolesRead, s.handleConnectionURI))
+			r.Get("/imports", s.requireScope(domain.ScopeImportsRead, s.handleListImports))
+			r.Post("/imports", s.requireScope(domain.ScopeImportsWrite, s.idempotent(s.handleCreateImport)))
+		})
+		r.Route("/imports/{imp}", func(r chi.Router) {
+			r.Get("/", s.requireScope(domain.ScopeImportsRead, s.handleGetImport))
+			r.Post("/cutover", s.requireScope(domain.ScopeImportsWrite, s.handleImportCutover))
+			r.Post("/abort", s.requireScope(domain.ScopeImportsWrite, s.handleImportAbort))
+			r.Patch("/state", s.requireScope(domain.ScopeImportsWrite, s.handleImportState))
 		})
 		r.Route("/branches/{br}", func(r chi.Router) {
 			r.Get("/", s.requireScope(domain.ScopeBranchesRead, s.handleGetBranch))

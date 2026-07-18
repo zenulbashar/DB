@@ -22,6 +22,7 @@ tags:
   - name: api-keys
   - name: projects
   - name: branches
+  - name: imports
   - name: audit
 
 paths:
@@ -563,6 +564,155 @@ paths:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
 
+  /projects/{prj}/imports:
+    parameters:
+      - name: prj
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [imports]
+      operationId: listImports
+      summary: List imports for a project
+      parameters:
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/cursor"
+      responses:
+        "200":
+          description: Imports
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Import" }
+                  next_cursor: { type: [string, "null"] }
+                required: [data]
+        "404": { $ref: "#/components/responses/Problem" }
+    post:
+      tags: [imports]
+      operationId: createImport
+      summary: Start a database import
+      description: |
+        The source connection URL is envelope-encrypted at rest and never
+        returned by any read path. Runner workers drive the state machine via
+        PATCH /imports/{imp}/state; cutover is a separate human gate.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                source_kind:
+                  type: string
+                  enum: [neon, supabase, rds, azure, generic]
+                mode:
+                  type: string
+                  enum: [dump_restore, logical_replication]
+                source_url:
+                  type: string
+                  description: postgres:// URL of the source (write-only).
+                target_branch: { type: [string, "null"] }
+              required: [source_kind, mode, source_url]
+      responses:
+        "201":
+          description: Created import (state pending)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Import" }
+        "404": { $ref: "#/components/responses/Problem" }
+
+  /imports/{imp}:
+    parameters:
+      - name: imp
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [imports]
+      operationId: getImport
+      summary: Get an import
+      responses:
+        "200":
+          description: Import
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Import" }
+        "404": { $ref: "#/components/responses/Problem" }
+
+  /imports/{imp}/cutover:
+    parameters:
+      - name: imp
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [imports]
+      operationId: cutoverImport
+      summary: Execute cutover (only from cutover_ready)
+      responses:
+        "200":
+          description: Import now cut_over
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Import" }
+        "409": { $ref: "#/components/responses/Problem" }
+
+  /imports/{imp}/abort:
+    parameters:
+      - name: imp
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [imports]
+      operationId: abortImport
+      summary: Abort an import (any non-terminal state except cut_over)
+      responses:
+        "200":
+          description: Import aborted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Import" }
+        "409": { $ref: "#/components/responses/Problem" }
+
+  /imports/{imp}/state:
+    parameters:
+      - name: imp
+        in: path
+        required: true
+        schema: { type: string }
+    patch:
+      tags: [imports]
+      operationId: updateImportState
+      summary: Advance the import state machine (runner-facing)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                state: { $ref: "#/components/schemas/ImportState" }
+                report: { type: object, additionalProperties: true }
+                checkpoints: { type: object, additionalProperties: true }
+                error: { type: [string, "null"] }
+              required: [state]
+      responses:
+        "200":
+          description: Updated import
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Import" }
+        "409":
+          description: Illegal transition
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
   /branches/{br}/roles:
     parameters:
       - name: br
@@ -985,6 +1135,37 @@ components:
             name: { type: string }
           required: [name]
       required: [project, owner_role, database]
+
+    ImportState:
+      type: string
+      enum: [pending, preflight, schema_copy, initial_copy, live_sync,
+             cutover_ready, cut_over, verified, failed, aborted]
+
+    Import:
+      type: object
+      properties:
+        id: { type: string }
+        project_id: { type: string }
+        target_branch_id: { type: [string, "null"] }
+        source_kind:
+          type: string
+          enum: [neon, supabase, rds, azure, generic]
+        mode:
+          type: string
+          enum: [dump_restore, logical_replication]
+        state: { $ref: "#/components/schemas/ImportState" }
+        report:
+          type: object
+          additionalProperties: true
+          description: Preflight report (set once preflight completes).
+        checkpoints:
+          type: object
+          additionalProperties: true
+          description: Progress markers merged across transitions.
+        error: { type: [string, "null"] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+      required: [id, project_id, target_branch_id, source_kind, mode, state, error, created_at, updated_at]
 
     AuditEntry:
       type: object

@@ -304,6 +304,107 @@ export interface paths {
         patch: operations["updateBranch"];
         trace?: never;
     };
+    "/projects/{prj}/imports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                prj: string;
+            };
+            cookie?: never;
+        };
+        /** List imports for a project */
+        get: operations["listImports"];
+        put?: never;
+        /**
+         * Start a database import
+         * @description The source connection URL is envelope-encrypted at rest and never
+         *     returned by any read path. Runner workers drive the state machine via
+         *     PATCH /imports/{imp}/state; cutover is a separate human gate.
+         */
+        post: operations["createImport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/imports/{imp}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                imp: string;
+            };
+            cookie?: never;
+        };
+        /** Get an import */
+        get: operations["getImport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/imports/{imp}/cutover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                imp: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Execute cutover (only from cutover_ready) */
+        post: operations["cutoverImport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/imports/{imp}/abort": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                imp: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Abort an import (any non-terminal state except cut_over) */
+        post: operations["abortImport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/imports/{imp}/state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                imp: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Advance the import state machine (runner-facing) */
+        patch: operations["updateImportState"];
+        trace?: never;
+    };
     "/branches/{br}/roles": {
         parameters: {
             query?: never;
@@ -561,6 +662,31 @@ export interface components {
             database: {
                 name: string;
             };
+        };
+        /** @enum {string} */
+        ImportState: "pending" | "preflight" | "schema_copy" | "initial_copy" | "live_sync" | "cutover_ready" | "cut_over" | "verified" | "failed" | "aborted";
+        Import: {
+            id: string;
+            project_id: string;
+            target_branch_id: string | null;
+            /** @enum {string} */
+            source_kind: "neon" | "supabase" | "rds" | "azure" | "generic";
+            /** @enum {string} */
+            mode: "dump_restore" | "logical_replication";
+            state: components["schemas"]["ImportState"];
+            /** @description Preflight report (set once preflight completes). */
+            report?: {
+                [key: string]: unknown;
+            };
+            /** @description Progress markers merged across transitions. */
+            checkpoints?: {
+                [key: string]: unknown;
+            };
+            error: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
         };
         AuditEntry: {
             id: string;
@@ -1314,6 +1440,183 @@ export interface operations {
             };
             404: components["responses"]["Problem"];
             409: components["responses"]["Problem"];
+        };
+    };
+    listImports: {
+        parameters: {
+            query?: {
+                limit?: components["parameters"]["limit"];
+                cursor?: components["parameters"]["cursor"];
+            };
+            header?: never;
+            path: {
+                prj: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Imports */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["Import"][];
+                        next_cursor?: string | null;
+                    };
+                };
+            };
+            404: components["responses"]["Problem"];
+        };
+    };
+    createImport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                prj: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    source_kind: "neon" | "supabase" | "rds" | "azure" | "generic";
+                    /** @enum {string} */
+                    mode: "dump_restore" | "logical_replication";
+                    /** @description postgres:// URL of the source (write-only). */
+                    source_url: string;
+                    target_branch?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Created import (state pending) */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Import"];
+                };
+            };
+            404: components["responses"]["Problem"];
+        };
+    };
+    getImport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                imp: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Import */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Import"];
+                };
+            };
+            404: components["responses"]["Problem"];
+        };
+    };
+    cutoverImport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                imp: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Import now cut_over */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Import"];
+                };
+            };
+            409: components["responses"]["Problem"];
+        };
+    };
+    abortImport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                imp: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Import aborted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Import"];
+                };
+            };
+            409: components["responses"]["Problem"];
+        };
+    };
+    updateImportState: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                imp: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    state: components["schemas"]["ImportState"];
+                    report?: {
+                        [key: string]: unknown;
+                    };
+                    checkpoints?: {
+                        [key: string]: unknown;
+                    };
+                    error?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Updated import */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Import"];
+                };
+            };
+            /** @description Illegal transition */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
         };
     };
     listDbRoles: {
