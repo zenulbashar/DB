@@ -480,8 +480,31 @@ func TestSuspendResumeFlow(t *testing.T) {
 		t.Fatalf("suspended branch still in work queue: %+v", work)
 	}
 
-	// Resume → resuming → (reconciler) ready.
-	b, err = s.ResumeBranch(ctx, res.Org.ID, brID)
+	// The branch is suspended; the privileged org-less gateway wake path resumes
+	// it exactly like ResumeBranch — suspended → resuming (endpoints too).
+	wb, err := s.WakeBranchByID(ctx, brID)
+	if err != nil {
+		t.Fatalf("wake by id: %v", err)
+	}
+	if wb.State != domain.StateResuming {
+		t.Fatalf("wake-by-id state = %s, want resuming", wb.State)
+	}
+	for _, ep := range wb.Endpoints {
+		if ep.State != domain.StateResuming {
+			t.Fatalf("wake-by-id endpoint state = %s, want resuming", ep.State)
+		}
+	}
+	// Idempotent (already resuming) and 404 for an unknown branch.
+	if _, err := s.WakeBranchByID(ctx, brID); err != nil {
+		t.Fatalf("idempotent wake: %v", err)
+	}
+	if _, err := s.WakeBranchByID(ctx, "br_doesnotexist"); err != store.ErrNotFound {
+		t.Fatalf("wake unknown branch = %v, want not found", err)
+	}
+
+	// Resume → resuming → (reconciler) ready. (Branch is already resuming from
+	// the wake above; MarkBranchResumed closes it out.)
+	b, err = s.GetBranch(ctx, res.Org.ID, brID)
 	if err != nil {
 		t.Fatal(err)
 	}

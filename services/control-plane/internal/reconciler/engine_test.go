@@ -253,8 +253,9 @@ func TestRoutesConfigMapPublished(t *testing.T) {
 	raw, _, _ := unstructured.NestedString(cm.Object, "data", "routes.json")
 	var parsed struct {
 		Endpoints map[string]struct {
-			Backend string `json:"backend"`
-			State   string `json:"state"`
+			Backend  string `json:"backend"`
+			State    string `json:"state"`
+			BranchID string `json:"branch_id"`
 		} `json:"endpoints"`
 	}
 	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
@@ -263,6 +264,10 @@ func TestRoutesConfigMapPublished(t *testing.T) {
 	direct := parsed.Endpoints["ep_01dir"]
 	if direct.Backend != "br-01test-rw.prj-01test.svc:5432" || direct.State != "ready" {
 		t.Fatalf("direct route = %+v", direct)
+	}
+	// branch_id must be emitted so the gateway can wake the branch (ADR-014).
+	if direct.BranchID != "br_01test" {
+		t.Fatalf("route branch_id = %q, want br_01test", direct.BranchID)
 	}
 	pooled := parsed.Endpoints["ep_01pool"]
 	if pooled.Backend != "br-01test-pooler.prj-01test.svc:5432" || pooled.State != "suspended" {

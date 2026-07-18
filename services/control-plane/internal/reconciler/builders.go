@@ -312,11 +312,14 @@ func BuildPooler(w postgres.BranchWork) *unstructured.Unstructured {
 }
 
 // routeEntry mirrors services/pg-gateway/internal/routes.Route's JSON shape
-// (separate modules; the ConfigMap is the contract between them).
+// (separate modules; the ConfigMap is the contract between them). BranchID lets
+// the gateway map a connecting suspended endpoint to the branch it must wake
+// (ADR-014).
 type routeEntry struct {
 	Backend  string `json:"backend"`
 	State    string `json:"state"`
 	MaxConns int    `json:"max_conns"`
+	BranchID string `json:"branch_id"`
 }
 
 // BuildRoutesJSON renders the gateway route table from routable endpoints.
@@ -327,6 +330,7 @@ func BuildRoutesJSON(eps []postgres.RoutableEndpoint) ([]byte, error) {
 			Backend:  BackendFor(e.Kind, e.BranchID, e.ProjectID),
 			State:    routeState(e.State),
 			MaxConns: e.MaxConns,
+			BranchID: e.BranchID,
 		}
 	}
 	return json.MarshalIndent(map[string]any{"endpoints": table}, "", "  ")

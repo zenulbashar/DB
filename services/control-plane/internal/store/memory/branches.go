@@ -157,6 +157,20 @@ func (s *Store) ResumeBranch(_ context.Context, orgID, branchID string) (*domain
 		domain.StateResuming, domain.StateReady)
 }
 
+// WakeBranchByID resolves the branch's org, then reuses ResumeBranch (mirrors
+// the postgres store; the privileged cross-tenant wake path — ADR-014).
+func (s *Store) WakeBranchByID(ctx context.Context, branchID string) (*domain.Branch, error) {
+	s.mu.Lock()
+	b, ok := s.branches[branchID]
+	if !ok || b.State == domain.StateDeleting {
+		s.mu.Unlock()
+		return nil, store.ErrNotFound
+	}
+	orgID := b.OrgID
+	s.mu.Unlock()
+	return s.ResumeBranch(ctx, orgID, branchID)
+}
+
 // transitionBranchState mirrors postgres.transitionBranchState: a guarded,
 // idempotent compute-state flip on the branch and its endpoints in lockstep.
 func (s *Store) transitionBranchState(orgID, branchID string,

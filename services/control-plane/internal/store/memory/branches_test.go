@@ -108,6 +108,35 @@ func TestSuspendResumeStateMachine(t *testing.T) {
 	}
 }
 
+func TestWakeBranchByID(t *testing.T) {
+	s := New()
+	ctx := context.Background()
+	seedReadyBranch(s, "org_1", "br_1")
+	s.forceState("br_1", domain.StateSuspended)
+
+	// Privileged, org-less wake flips suspended → resuming (endpoints too).
+	b, err := s.WakeBranchByID(ctx, "br_1")
+	if err != nil {
+		t.Fatalf("wake: %v", err)
+	}
+	if b.State != domain.StateResuming {
+		t.Fatalf("branch state = %s, want resuming", b.State)
+	}
+	for _, st := range endpointStates(s, "br_1") {
+		if st != domain.StateResuming {
+			t.Fatalf("endpoint state = %s, want resuming", st)
+		}
+	}
+	// Idempotent (already resuming).
+	if _, err := s.WakeBranchByID(ctx, "br_1"); err != nil {
+		t.Fatalf("idempotent wake = %v, want success", err)
+	}
+	// Unknown branch is 404.
+	if _, err := s.WakeBranchByID(ctx, "br_missing"); err != store.ErrNotFound {
+		t.Fatalf("wake missing = %v, want not found", err)
+	}
+}
+
 func TestSuspendResumeGuards(t *testing.T) {
 	s := New()
 	ctx := context.Background()

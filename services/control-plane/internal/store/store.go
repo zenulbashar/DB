@@ -192,6 +192,12 @@ type Store interface {
 	// returns ErrNotFound.
 	SuspendBranch(ctx context.Context, orgID, branchID string) (*domain.Branch, error)
 	ResumeBranch(ctx context.Context, orgID, branchID string) (*domain.Branch, error)
+	// WakeBranchByID is the PRIVILEGED, cross-tenant resume the pg-gateway calls
+	// for wake-on-connect (ADR-014): the gateway serves every tenant and has no
+	// org-scoped credential, so it addresses a branch by ID. It resolves the
+	// owning org and applies the same idempotent suspended→resuming flip as
+	// ResumeBranch. ErrNotFound for a missing/deleting branch.
+	WakeBranchByID(ctx context.Context, branchID string) (*domain.Branch, error)
 	ListEndpoints(ctx context.Context, orgID, branchID string) ([]domain.Endpoint, error)
 
 	CreateDBRole(ctx context.Context, p CreateDBRoleParams) (*domain.DBRole, error)

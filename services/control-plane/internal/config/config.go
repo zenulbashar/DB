@@ -10,6 +10,7 @@ type Config struct {
 	Port           string
 	DatabaseURL    string
 	BootstrapToken string
+	GatewayToken   string // NDB_GATEWAY_TOKEN — authenticates the gateway wake call (ADR-014)
 	Env            string // dev|staging|prod
 	Version        string
 	KEKs           string // NDB_KEKS keyring spec, "1:<base64>,…" (SECURITY_MODEL §5)
@@ -21,6 +22,7 @@ func Load() (Config, error) {
 		Port:           getenv("PORT", "8080"),
 		DatabaseURL:    os.Getenv("DATABASE_URL"),
 		BootstrapToken: os.Getenv("NDB_BOOTSTRAP_TOKEN"),
+		GatewayToken:   os.Getenv("NDB_GATEWAY_TOKEN"),
 		Env:            getenv("NDB_ENV", "dev"),
 		Version:        getenv("NDB_VERSION", "dev"),
 		KEKs:           os.Getenv("NDB_KEKS"),

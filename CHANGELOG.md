@@ -2,6 +2,37 @@
 
 All notable changes to this repository. Format loosely follows [Keep a Changelog](https://keepachangelog.com/); one entry per phase gate plus notable intermediate merges.
 
+## [Phase 4 — gateway wake API surface] — 2026-07-18
+
+The control-plane half of gateway wake-on-connect (ADR-014 addendum): the privileged endpoint the
+pg-gateway will call to wake a suspended branch, plus the routing data it needs. The gateway-side
+hold/coalesce/poll logic is the next increment.
+
+### Added
+- **Internal wake endpoint** `POST /internal/branches/{br}/wake` — privileged and cross-tenant
+  (the gateway serves every tenant, so it cannot use the org-scoped `POST /branches/{br}/resume`).
+  It resolves the branch's org internally and performs the same idempotent `suspended → resuming`
+  flip, so the human resume and the gateway wake converge through one transition. Authenticated by
+  a shared `NDB_GATEWAY_TOKEN` bearer (constant-time compared, bootstrap-token shape); the whole
+  `/internal` surface is **disabled when the token is unset**. Every call is audited
+  (`branch.wake`, actor = system). 401 without the token, 404 for an unknown branch, 409 for a
+  branch not in a wakeable state.
+- **`WakeBranchByID`** store method (Postgres + memory) — resolves the org, then reuses the
+  org-scoped `ResumeBranch` transition so the state-machine logic lives in one place.
+- **`branch_id` in the route table** — the reconciler now emits `branch_id` per endpoint
+  (`RoutableEndpoint` → route JSON → the gateway's `routes.Route`), so the gateway can map a
+  connecting suspended endpoint to the branch it must wake.
+
+### Security
+- SECURITY_MODEL §3 documents the interim `NDB_GATEWAY_TOKEN` bearer as a scoped exception to
+  "no shared static internal secrets" (single capability — flip to `resuming` by ID; cannot read
+  secrets/provision/delete; internal-network only; pending mTLS).
+
+### Tests
+- Store round-trips for `WakeBranchByID` (suspended→resuming, idempotent, 404); server tests for
+  the internal endpoint (token required, disabled when unset, 404/409 mapping); reconciler asserts
+  `branch_id` in the emitted route JSON.
+
 ## [Phase 4 — scale-to-zero spine] — 2026-07-18
 
 The control-plane half of serverless scale-to-zero: a branch/endpoint **compute state

@@ -18,7 +18,11 @@ type Config struct {
 	// BootstrapToken enables POST /v1/bootstrap while the platform has no org
 	// (ADR-013). Empty disables the endpoint entirely.
 	BootstrapToken string
-	Version        string
+	// GatewayToken authenticates the pg-gateway's privileged wake call
+	// (POST /internal/branches/{br}/wake; ADR-014). Empty disables the entire
+	// /internal surface (SECURITY_MODEL §3).
+	GatewayToken string
+	Version      string
 	// Keyring encrypts tenant secret material (SECURITY_MODEL §5). Required.
 	Keyring *secrets.Keyring
 }
@@ -50,6 +54,12 @@ func (s *Server) routes() {
 	s.mux.Get("/healthz", s.handleHealth)
 	s.mux.Get("/v1/healthz", s.handleHealth)
 	s.mux.Post("/v1/bootstrap", s.handleBootstrap)
+
+	// Internal platform surface: not part of the tenant API, authenticated by
+	// the shared gateway token (disabled entirely when unset). ADR-014.
+	s.mux.Route("/internal", func(r chi.Router) {
+		r.Post("/branches/{br}/wake", s.authenticateGateway(s.handleWakeBranchInternal))
+	})
 
 	s.mux.Route("/v1", func(r chi.Router) {
 		r.Use(s.authenticate)

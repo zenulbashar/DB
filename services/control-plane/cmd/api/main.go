@@ -68,7 +68,8 @@ func main() {
 	srv := &http.Server{
 		Addr: ":" + cfg.Port,
 		Handler: server.New(st, server.Config{
-			BootstrapToken: cfg.BootstrapToken, Version: cfg.Version, Keyring: keyring,
+			BootstrapToken: cfg.BootstrapToken, GatewayToken: cfg.GatewayToken,
+			Version: cfg.Version, Keyring: keyring,
 		}, log),
 		ReadHeaderTimeout: 10 * time.Second,
 	}

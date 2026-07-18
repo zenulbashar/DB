@@ -227,6 +227,24 @@ func (s *Store) ResumeBranch(ctx context.Context, orgID, branchID string) (*doma
 		[]domain.ResourceState{domain.StateResuming, domain.StateReady})
 }
 
+// WakeBranchByID resolves the branch's org with a privileged read, then reuses
+// the org-scoped ResumeBranch so the transition logic lives in exactly one
+// place (ADR-014: the gateway wake and the human resume converge).
+func (s *Store) WakeBranchByID(ctx context.Context, branchID string) (*domain.Branch, error) {
+	var orgID string
+	err := s.withPrivTx(ctx, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx,
+			`SELECT org_id FROM branches WHERE id = $1 AND state <> 'deleting'`, branchID).Scan(&orgID)
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, store.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return s.ResumeBranch(ctx, orgID, branchID)
+}
+
 // transitionBranchState performs an org-scoped, guarded compute-state flip on a
 // branch and its endpoints in lockstep. It only writes when the branch is in
 // `from` (and validates from → to against the domain state machine as

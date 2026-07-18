@@ -27,6 +27,11 @@ type Route struct {
 	// MaxConns caps concurrent client connections through the gateway for
 	// this endpoint; 0 means unlimited.
 	MaxConns int `json:"max_conns"`
+	// BranchID identifies the branch to wake when this endpoint is suspended
+	// (wake-on-connect trigger; ADR-014). Empty until the reconciler that
+	// populates it is deployed — the gateway treats an empty value as
+	// "not wakeable" and falls back to the suspended rejection.
+	BranchID string `json:"branch_id"`
 }
 
 type tableFile struct {
