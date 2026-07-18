@@ -323,6 +323,66 @@ func TestBranchLifecycleAndRLS(t *testing.T) {
 	}
 }
 
+func TestReconcilerStoreFlow(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	res := bootstrapOrg(t, s, "acme")
+
+	pr, err := s.CreateProject(ctx, store.CreateProjectParams{OrgID: res.Org.ID, Name: "App", Region: "syd1", PGVersion: 17})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// New project's main branch appears as provisioning work with context.
+	work, err := s.ListReconcileWork(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(work) != 1 || work[0].Branch.ID != *pr.DefaultBranchID ||
+		work[0].Region != "syd1" || work[0].PGVersion != 17 || len(work[0].Endpoints) != 2 {
+		t.Fatalf("unexpected work: %+v", work)
+	}
+
+	// Nothing routable until ready.
+	routable, err := s.ListRoutableEndpoints(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(routable) != 0 {
+		t.Fatalf("provisioning endpoints must not be routable: %+v", routable)
+	}
+
+	if err := s.MarkBranchReady(ctx, *pr.DefaultBranchID); err != nil {
+		t.Fatal(err)
+	}
+	if work, _ = s.ListReconcileWork(ctx); len(work) != 0 {
+		t.Fatalf("ready branch still in work queue: %+v", work)
+	}
+	if routable, _ = s.ListRoutableEndpoints(ctx); len(routable) != 2 {
+		t.Fatalf("want 2 routable endpoints, got %d", len(routable))
+	}
+
+	// Deleting the project queues teardown; finishing it clears the rows
+	// (including the default-branch FK back-reference).
+	if err := s.SoftDeleteProject(ctx, res.Org.ID, pr.ID, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	work, _ = s.ListReconcileWork(ctx)
+	if len(work) != 1 || work[0].Branch.State != domain.StateDeleting {
+		t.Fatalf("teardown work = %+v", work)
+	}
+	n, err := s.CountLiveBranches(ctx, pr.ID)
+	if err != nil || n != 0 {
+		t.Fatalf("live branches = %d (%v), want 0", n, err)
+	}
+	if err := s.FinishBranchTeardown(ctx, *pr.DefaultBranchID); err != nil {
+		t.Fatal(err)
+	}
+	if work, _ = s.ListReconcileWork(ctx); len(work) != 0 {
+		t.Fatalf("work queue not drained: %+v", work)
+	}
+}
+
 func TestLastOwnerRule(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()

@@ -32,9 +32,28 @@ All notable changes to this repository. Format loosely follows [Keep a Changelog
   rejection, connection-cap enforcement and release, plaintext rejection (TLS-only posture).
 - CI: dedicated pg-gateway job (gofmt/vet/e2e vs postgres:17/build); Makefile targets.
 
+### Added (2c: reconciler + CNPG provisioning, 2026-07-18)
+- `cmd/reconciler` + `internal/reconciler`: desired-state convergence loop — per-project
+  namespace with ResourceQuota and default-deny + allow-gateway NetworkPolicies
+  (MULTI_TENANCY §2/§3), CNPG `Cluster` per branch (production role → 2 instances,
+  guaranteed-QoS sizing from CU, `pg_stat_statements` preloaded, superuser access off),
+  transaction-mode `Pooler` with `max_prepared_statements` for extended-protocol clients,
+  readiness detection via CNPG `status.readyInstances` → branch/endpoints flip to `ready`,
+  teardown (deleting branches → k8s objects removed, namespace removed with the last branch,
+  rows purged), and gateway route-table ConfigMap publication (backend =
+  `<cluster>-rw/-pooler/-ro.<ns>.svc:5432`).
+- Privileged reconciler store methods (`ListReconcileWork`, `MarkBranchReady`,
+  `FinishBranchTeardown`, `CountLiveBranches`, `ListRoutableEndpoints`) — platform-actor
+  paths, never exposed via the API.
+- Tests: fake-client suite (provision shape, readiness gating, idempotent re-runs, teardown,
+  route ConfigMap contents) + store integration flow (work queue → ready → routable →
+  teardown drained).
+
 ### Pending in Phase 2
-- 2c: reconciler + CNPG provisioning, WAL archiving/PITR, restore-verification job,
-  audit writes moved into mutation transactions.
+- WAL archiving/PITR wiring (barman-cloud object-store config on the Cluster spec) +
+  nightly restore-verification job; TLS cert issuance per endpoint; audit writes moved
+  into mutation transactions; live-cluster validation on a kind/staging environment
+  (fake-client coverage only so far — this environment has no Docker daemon).
 
 ## [Phase 1] — 2026-07-17
 
