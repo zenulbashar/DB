@@ -45,7 +45,7 @@ New ADRs are appended; superseding requires a link both ways.
 ## ADR-007 · Custom `pg-gateway` for TCP ingress — `accepted`
 **Context:** Requirements: TLS+SNI routing to per-branch services, wake-on-connect hold for scale-to-zero, per-endpoint caps/metering, startup-parameter fallback routing. Traefik v3 does Postgres STARTTLS SNI routing but cannot hold-and-wake; per-branch LoadBalancers explode cost.
 **Decision:** small Go proxy: parse startup/TLS, route, hold, count — **no protocol rewriting**; Traefik remains for HTTP only.
-**Consequences:** we own a data-path component (R-7): fuzzing, soak tests, canaries mandatory; it becomes the natural insertion point for Gen-2 features (quotas, read-write splitting) later.
+**Consequences:** we own a data-path component (R-7): fuzzing, soak tests, canaries mandatory; it becomes the natural insertion point for Gen-2 features (quotas, read-write splitting) later. ADR-007 defines the *hold*; the wake *signal* transport is decided separately in ADR-014 (a single coalesced POST to the control-plane API — a bounded expansion of this "route, hold, count" scope, not a general API client or DB access).
 
 ## ADR-008 · Compute stays Nimbus's domain; NimbusDB does databases — `accepted`
 **Context:** Roadmap lists serverless compute/functions; Nimbus already is the compute/hosting product with `site` and `agent` kinds.
@@ -85,6 +85,47 @@ Console session auth (magic-link, MFA path per SECURITY_MODEL §3) lands with th
 Phase 3. ROADMAP Phase 1/3 scopes updated accordingly.
 **Consequences:** Phase 1 gate ("an API key can create an org/project record") is fully testable
 without email infra; no throwaway auth code.
+
+## ADR-014 · Wake/suspend are desired-state flips through the branch state machine; the gateway triggers wake via the control-plane API, never a reconciler RPC or a direct DB write — `accepted`
+**Context:** Phase 4 scale-to-zero needs a *wake-on-connect* trigger: when a client hits a
+suspended endpoint the gateway holds the connection and something must un-hibernate the compute.
+The docs were inconsistent about what that "something" is — the SYSTEM_ARCHITECTURE §2 mermaid drew
+a direct `gateway → reconciler` edge, while design principle #2 and MASTER §7 ("everything
+reconciles; no imperative fire-and-forget") forbid exactly that. ADR-007 scopes the gateway to
+"route, hold, count" and is silent on the wake signal. Three transports were on the table:
+(a) gateway → control-plane API HTTP call; (b) gateway writes/flips desired state directly in the
+control-plane DB; (c) gateway → reconciler RPC.
+**Decision:** Suspend and wake are **desired-state transitions on the branch**, converged by the
+reconciler — the same shape as provisioning and teardown. A branch's single `state` column carries
+two new *transitional* states: `suspending` (ready → suspending, reconciler hibernates the CNPG
+cluster + scales the pooler to zero → `suspended`) and `resuming` (suspended → resuming, reconciler
+un-hibernates + scales the pooler back → `ready`). Endpoints move in lockstep. The **gateway's
+automatic wake** is a call to the control-plane API's resume action (transport **a**), which
+performs the `suspended → resuming` flip; the reconciler observes and converges. We reject **(b)** —
+giving a data-path component control-plane DB credentials is a large security/coupling expansion
+(the gateway holds tenant bytes, per ADR-007/R-7) — and **(c)** — a fire-and-forget RPC violates
+MASTER §7 and makes wake non-crash-safe. The transitional state *is* the durable desired-state
+record, so a wake survives a reconciler restart. Wake is **coalesced per branch**: the flip is
+idempotent (a resume on an already-`resuming`/`ready` branch is a no-op success), so a connection
+storm produces at most one state change (SECURITY_MODEL §2). The same resume action serves the
+human "resume" API call, the gateway's on-connect wake, and Nimbus's deploy-time prewarm ping
+(R-3) — one path, one idempotency.
+**Alternatives:** direct DB flip (rejected — credentials/coupling); reconciler RPC (rejected —
+not crash-safe, violates reconciliation model); a separate `desired_compute_state` column
+(rejected — the existing transitional-state pattern already models desired state and the reconciler
+already only acts on transitional states, so reusing it is simpler and consistent).
+**Consequences:** the gateway gains exactly one outbound dependency — a single authenticated,
+coalesced POST to the control-plane API (a bounded, reviewed expansion of ADR-007's scope, tracked
+under R-7), not a full API client or DB access. The wake path is `gateway → control-plane API →
+control-plane DB → reconciler`, which fixes those components as the highest-availability tier
+(SYSTEM_ARCHITECTURE §5): during a full control-plane outage, already-running databases keep
+serving (routes are cached in the gateway) but *suspended* branches cannot wake — an honest,
+documented limitation (R-3). Hitting the p95 < 25 s wake SLO requires the reconciler to observe the
+`resuming` flip promptly (short reconcile interval / event-driven wake), noted for the Phase 4 wake
+implementation. This increment lands the control-plane spine (state machine + reconciler
+hibernation + route mapping); the gateway hold-and-wake and the idle-suspend detector are the
+follow-on increments that build on it. Supersedes the §2 mermaid's direct gateway→reconciler edge,
+which is redrawn to `gateway → API`.
 
 ---
 

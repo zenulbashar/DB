@@ -23,7 +23,9 @@ type BranchWork struct {
 }
 
 // ListReconcileWork returns branches in transitional states (provisioning,
-// deleting) with the project context needed to build resources.
+// deleting, suspending, resuming) with the project context needed to build
+// resources. The reconciler only acts on transitional states; suspending and
+// resuming are the scale-to-zero convergence work (ADR-014).
 func (s *Store) ListReconcileWork(ctx context.Context) ([]BranchWork, error) {
 	var out []BranchWork
 	err := s.withPrivTx(ctx, func(tx pgx.Tx) error {
@@ -32,7 +34,7 @@ func (s *Store) ListReconcileWork(ctx context.Context) ([]BranchWork, error) {
 			       b.compute_min_cu, b.compute_max_cu, b.suspend_timeout_s, b.retention_days, b.created_at,
 			       p.region, p.pg_version
 			  FROM branches b JOIN projects p ON p.id = b.project_id
-			 WHERE b.state IN ('provisioning','deleting')
+			 WHERE b.state IN ('provisioning','deleting','suspending','resuming')
 			 ORDER BY b.id`)
 		if err != nil {
 			return err
@@ -74,6 +76,33 @@ func (s *Store) MarkBranchReady(ctx context.Context, branchID string) error {
 		}
 		_, err = tx.Exec(ctx,
 			`UPDATE endpoints SET state = 'ready' WHERE branch_id = $1 AND state = 'provisioning'`, branchID)
+		return err
+	})
+}
+
+// MarkBranchSuspended flips a suspending branch (and its endpoints) to
+// suspended once the reconciler has hibernated the compute (ADR-014). The
+// guard on state='suspending' keeps it idempotent and safe against a stale
+// re-run.
+func (s *Store) MarkBranchSuspended(ctx context.Context, branchID string) error {
+	return s.markBranchComputeState(ctx, branchID, "suspending", "suspended")
+}
+
+// MarkBranchResumed flips a resuming branch (and its endpoints) back to ready
+// once the compute is un-hibernated and healthy.
+func (s *Store) MarkBranchResumed(ctx context.Context, branchID string) error {
+	return s.markBranchComputeState(ctx, branchID, "resuming", "ready")
+}
+
+func (s *Store) markBranchComputeState(ctx context.Context, branchID, from, to string) error {
+	return s.withPrivTx(ctx, func(tx pgx.Tx) error {
+		ct, err := tx.Exec(ctx,
+			`UPDATE branches SET state = $2 WHERE id = $1 AND state = $3`, branchID, to, from)
+		if err != nil || ct.RowsAffected() == 0 {
+			return err
+		}
+		_, err = tx.Exec(ctx,
+			`UPDATE endpoints SET state = $2 WHERE branch_id = $1 AND state = $3`, branchID, to, from)
 		return err
 	})
 }
@@ -137,17 +166,21 @@ type RoutableEndpoint struct {
 }
 
 // ListRoutableEndpoints returns endpoints whose branches are live enough to
-// route (ready or suspended — suspended entries let the gateway answer with
-// a clear error today and wake-on-connect in Phase 4). MaxConns is derived
-// from the branch's compute ceiling so the gateway's per-endpoint cap is
-// actually populated (audit finding: it was always 0/unlimited).
+// route. It admits ready, suspended, AND the transitional suspending/resuming
+// states — a resuming branch MUST stay in the route table so the gateway can
+// hold and wake a connecting client; dropping it would surface as "endpoint not
+// found" instead of a clean suspended answer (ADR-014). The transitional states
+// are mapped down to "suspended" for the gateway in BuildRoutesJSON. MaxConns
+// is derived from the branch's compute ceiling (audit finding: it was always
+// 0/unlimited).
 func (s *Store) ListRoutableEndpoints(ctx context.Context) ([]RoutableEndpoint, error) {
 	var out []RoutableEndpoint
 	err := s.withPrivTx(ctx, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
 			SELECT e.id, e.branch_id, b.project_id, e.kind, e.state, b.compute_max_cu
 			  FROM endpoints e JOIN branches b ON b.id = e.branch_id
-			 WHERE e.state IN ('ready','suspended') AND b.state IN ('ready','suspended')
+			 WHERE e.state IN ('ready','suspending','suspended','resuming')
+			   AND b.state IN ('ready','suspending','suspended','resuming')
 			 ORDER BY e.id`)
 		if err != nil {
 			return err

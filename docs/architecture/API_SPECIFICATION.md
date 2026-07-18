@@ -60,7 +60,7 @@ membership management need scopes distinct from read access.)
 /branches/{br}/roles/{role}/reset-password  POST             (returns new secret once)
 /branches/{br}/backups                  GET, POST
 /branches/{br}/restore                  POST                 ({target_time|lsn|backup_id, mode: new_branch|promote})
-/branches/{br}/suspend | /resume        POST
+/branches/{br}/suspend | /resume        POST                 (compute state flips; branches:write; idempotent/coalesced. resume is also the gateway wake-on-connect trigger — ADR-014. Storage-agnostic: no CNPG/hibernation detail leaks to the client)
 /branches/{br}/metrics                  GET                  (time-series slices for dashboards)
 /branches/{br}/query-insights           GET                  (Phase 7)
 /branches/{br}/sql                      POST                 (console SQL editor proxy; short-lived scoped exec)

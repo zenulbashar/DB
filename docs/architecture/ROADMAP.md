@@ -51,7 +51,7 @@
 ## Phase 4 — Elastic compute
 
 **Scope**
-- Scale-to-zero: suspend on idle, gateway wake-on-connect (hold + resume), per-plan `suspend_timeout`.
+- Scale-to-zero: suspend/resume state machine + reconciler CNPG hibernation (the spine, first); then gateway wake-on-connect (hold + control-plane resume flip, ADR-014); then suspend-on-idle detection (gateway connection counters → control plane), per-plan `suspend_timeout`.
 - Vertical autoscaling between CU bounds; zero-downtime resize on HA tier (replica-first switchover).
 - Read replicas + `ro-pooled` endpoint.
 - Branching/cloning v1 (snapshot + PITR modes) and instant restore via endpoint promotion.

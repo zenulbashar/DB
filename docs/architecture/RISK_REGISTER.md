@@ -53,3 +53,14 @@
   the URL from parse errors. Plus a per-poll target-connection leak (R-7) and a
   target-owner-role mismatch (wrong-role connect) fixed. No new open risks; existing
   mitigations tightened.
+- 2026-07-18 — **Phase 4 scale-to-zero spine** (control-plane suspend/resume state machine +
+  reconciler CNPG hibernation + route mapping; gateway hold-and-wake and idle-suspend follow).
+  ADR-014 resolves a pre-existing doc inconsistency on the wake-trigger transport (the §2 mermaid
+  drew a forbidden direct gateway→reconciler RPC): wake/suspend are **desired-state flips** the
+  reconciler converges, and the gateway's on-connect wake is a single **coalesced** authenticated
+  POST to the control-plane API — a bounded, reviewed expansion of the gateway's "route, hold,
+  count" scope (**R-7**), deliberately *not* DB access or a full API client. This makes the wake
+  path `gateway → API → control-plane DB → reconciler` explicit as the highest-availability tier
+  (**R-3**: suspended branches cannot wake during a full control-plane outage — honest, documented).
+  Wake coalescing (one wake per branch under a connection storm) is preserved from SECURITY_MODEL
+  §2; the idle-suspend and billing-suspend paths reuse one reconciler action. No new open risks.

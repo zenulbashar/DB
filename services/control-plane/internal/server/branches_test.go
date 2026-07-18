@@ -2,6 +2,7 @@ package server_test
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -149,6 +150,50 @@ func TestBranchLifecycle(t *testing.T) {
 	status, _ = do(t, e.h, "GET", "/v1/branches/"+defBr, e.token, nil, nil)
 	if status != http.StatusNotFound {
 		t.Fatalf("default branch after project delete = %d, want 404", status)
+	}
+}
+
+func TestBranchSuspendResumeWiring(t *testing.T) {
+	e := bootstrapped(t)
+	_, defBr := createProject(t, e, "wakeapp")
+
+	// A freshly-created branch is provisioning (no reconciler in this test), so
+	// suspend is an illegal transition → 409. This exercises the route, scope,
+	// and error mapping end-to-end.
+	status, body := do(t, e.h, "POST", "/v1/branches/"+defBr+"/suspend", e.token, nil, nil)
+	if status != http.StatusConflict {
+		t.Fatalf("suspend provisioning branch = %d, want 409 (%s)", status, body)
+	}
+	var prob struct {
+		Type string `json:"type"`
+	}
+	mustUnmarshal(t, body, &prob)
+	if !strings.HasSuffix(prob.Type, "illegal-state-transition") {
+		t.Fatalf("problem type = %q, want …/illegal-state-transition", prob.Type)
+	}
+	// Resume of a provisioning branch is likewise a conflict.
+	if status, _ = do(t, e.h, "POST", "/v1/branches/"+defBr+"/resume", e.token, nil, nil); status != http.StatusConflict {
+		t.Fatalf("resume provisioning branch = %d, want 409", status)
+	}
+
+	// suspend/resume require branches:write.
+	status, body = do(t, e.h, "POST", "/v1/orgs/"+e.orgID+"/api-keys", e.token, map[string]any{
+		"name": "ro", "scopes": []string{"branches:read"},
+	}, nil)
+	if status != http.StatusCreated {
+		t.Fatalf("create key = %d %s", status, body)
+	}
+	var key struct {
+		Token string `json:"token"`
+	}
+	mustUnmarshal(t, body, &key)
+	if status, _ = do(t, e.h, "POST", "/v1/branches/"+defBr+"/suspend", key.Token, nil, nil); status != http.StatusForbidden {
+		t.Fatalf("suspend with branches:read = %d, want 403", status)
+	}
+
+	// Unknown branch → 404.
+	if status, _ = do(t, e.h, "POST", "/v1/branches/br_nope/suspend", e.token, nil, nil); status != http.StatusNotFound {
+		t.Fatalf("suspend unknown branch = %d, want 404", status)
 	}
 }
 

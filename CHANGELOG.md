@@ -2,6 +2,51 @@
 
 All notable changes to this repository. Format loosely follows [Keep a Changelog](https://keepachangelog.com/); one entry per phase gate plus notable intermediate merges.
 
+## [Phase 4 — scale-to-zero spine] — 2026-07-18
+
+The control-plane half of serverless scale-to-zero: a branch/endpoint **compute state
+machine** the reconciler converges into **CNPG hibernation**. This is the spine; the gateway
+hold-and-wake and the idle-suspend detector are the follow-on increments that build on it.
+
+### Decided
+- **ADR-014 — wake/suspend are desired-state flips, not RPCs.** Resolves a pre-existing doc
+  inconsistency (the SYSTEM_ARCHITECTURE §2 mermaid drew a forbidden direct `gateway → reconciler`
+  edge). Suspend and wake are transitional branch states the reconciler converges; the gateway's
+  on-connect wake (next increment) is a single **coalesced** authenticated POST to the control-plane
+  API — a bounded, reviewed expansion of the gateway's "route, hold, count" scope (R-7), not DB
+  access. Wake path = `gateway → API → control-plane DB → reconciler`, made explicit as the
+  highest-availability tier (R-3).
+
+### Added
+- **Compute state machine.** New transitional states `suspending` (ready → suspending →
+  suspended) and `resuming` (suspended → resuming → ready), shared by branches and endpoints and
+  moved in lockstep. `domain.CanTransitionResource` validates the edges as defence-in-depth over
+  the store's guarded SQL. Migration `0007` widens the `branches`/`endpoints` state CHECKs.
+- **Store transitions.** `SuspendBranch`/`ResumeBranch` (org-scoped, **idempotent** — a repeat or a
+  wake storm is a no-op 200, not a 409; illegal source state is 409, missing is 404) on both the
+  Postgres and memory stores. Reconciler-side `MarkBranchSuspended`/`MarkBranchResumed` (privileged,
+  guarded). `ListReconcileWork` and `ListRoutableEndpoints` now admit the transitional states, so a
+  resuming branch stays in the route table (the gateway can hold/wake instead of 404-ing).
+- **Reconciler hibernation.** `suspend`/`resume` convergence: `BuildCluster` toggles the CNPG
+  `cnpg.io/hibernation` annotation (spec.instances is left at the role value — instances:0 is
+  webhook-rejected), `BuildPooler` scales to zero when suspended, and `ensure()` now **merges**
+  `metadata.annotations` (preserving operator-managed keys) so the toggle reaches an existing
+  cluster. Suspend completes when CNPG reports no ready instances; resume reuses the existing
+  ready gate.
+- **API.** `POST /branches/{br}/suspend` and `/resume` (`branches:write`, audited), 409 on an
+  illegal state transition. Spec-first: `api/openapi.yaml` + regenerated TS client.
+
+### Notes
+- The gateway needs **no change** this increment: `suspending`/`resuming` map down to `suspended`
+  in the route table, so the gateway keeps cleanly rejecting a suspended endpoint until
+  hold-and-wake replaces that rejection next.
+
+### Tests
+- Domain edge-legality table; memory + Postgres state-machine round-trips (lockstep, idempotency,
+  cross-org 404, illegal-transition 409); reconciler suspend→hibernate→mark and
+  resume→unhibernate→ready with the CNPG fake client; transitional→"suspended" route mapping; and
+  HTTP wiring (route, scope, 409, 404).
+
 ## [Import-worker hardening audit] — 2026-07-18
 
 A focused adversarial audit of the newly-live import worker and its migration runner

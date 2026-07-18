@@ -21,6 +21,8 @@ type fakeSource struct {
 	work      []postgres.BranchWork
 	routable  []postgres.RoutableEndpoint
 	ready     []string
+	suspended []string
+	resumed   []string
 	tornDown  []string
 	liveCount map[string]int
 }
@@ -30,6 +32,14 @@ func (f *fakeSource) ListReconcileWork(context.Context) ([]postgres.BranchWork, 
 }
 func (f *fakeSource) MarkBranchReady(_ context.Context, id string) error {
 	f.ready = append(f.ready, id)
+	return nil
+}
+func (f *fakeSource) MarkBranchSuspended(_ context.Context, id string) error {
+	f.suspended = append(f.suspended, id)
+	return nil
+}
+func (f *fakeSource) MarkBranchResumed(_ context.Context, id string) error {
+	f.resumed = append(f.resumed, id)
 	return nil
 }
 func (f *fakeSource) FinishBranchTeardown(_ context.Context, id string) error {

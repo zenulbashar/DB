@@ -182,6 +182,16 @@ type Store interface {
 	ListBranches(ctx context.Context, orgID, projectID string, pg Page) ([]domain.Branch, string, error)
 	UpdateBranch(ctx context.Context, orgID, branchID string, p UpdateBranchParams) (*domain.Branch, error)
 	SoftDeleteBranch(ctx context.Context, orgID, branchID string, at time.Time) error // ErrDefaultBranch for the default
+	// SuspendBranch flips a ready branch (and its endpoints) to suspending —
+	// the reconciler then hibernates the compute and marks it suspended
+	// (ADR-014). ResumeBranch flips a suspended branch to resuming (the
+	// wake-on-connect trigger). Both are idempotent: a suspend on an
+	// already-suspending/suspended branch, or a resume on an
+	// already-resuming/ready branch, is a no-op success (so a wake coalesces).
+	// Any other current state returns ErrConflict; a missing/deleting branch
+	// returns ErrNotFound.
+	SuspendBranch(ctx context.Context, orgID, branchID string) (*domain.Branch, error)
+	ResumeBranch(ctx context.Context, orgID, branchID string) (*domain.Branch, error)
 	ListEndpoints(ctx context.Context, orgID, branchID string) ([]domain.Endpoint, error)
 
 	CreateDBRole(ctx context.Context, p CreateDBRoleParams) (*domain.DBRole, error)

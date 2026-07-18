@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"time"
 
@@ -134,6 +135,45 @@ func (s *Server) handleDeleteBranch(w http.ResponseWriter, r *http.Request) {
 	}
 	s.auditKey(r, p.OrgID, "branch.delete", "branch", brID, nil)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleSuspendBranch flips a ready branch to suspending (the reconciler
+// hibernates the compute). handleResumeBranch flips a suspended branch to
+// resuming — the same action the gateway will call for wake-on-connect
+// (ADR-014). Both are idempotent, so a repeated call (or a wake storm) is a
+// no-op 200 rather than a 409.
+func (s *Server) handleSuspendBranch(w http.ResponseWriter, r *http.Request) {
+	s.branchComputeAction(w, r, (store.Store).SuspendBranch, "branch.suspend")
+}
+
+func (s *Server) handleResumeBranch(w http.ResponseWriter, r *http.Request) {
+	s.branchComputeAction(w, r, (store.Store).ResumeBranch, "branch.resume")
+}
+
+func (s *Server) branchComputeAction(w http.ResponseWriter, r *http.Request,
+	action func(store.Store, context.Context, string, string) (*domain.Branch, error), auditAction string) {
+	p := principalFrom(r.Context())
+	brID := chi.URLParam(r, "br")
+	b, err := action(s.store, r.Context(), p.OrgID, brID)
+	if err != nil {
+		s.branchErr(w, r, err)
+		return
+	}
+	s.auditKey(r, p.OrgID, auditAction, "branch", brID, map[string]any{"state": b.State})
+	writeJSON(w, http.StatusOK, b)
+}
+
+// branchErr maps an illegal compute-state transition to 409 with a clear
+// message (a branch that is provisioning/deleting/error cannot be
+// suspended/resumed); everything else defers to storeErr.
+func (s *Server) branchErr(w http.ResponseWriter, r *http.Request, err error) {
+	if err == store.ErrConflict {
+		writeProblem(w, r, http.StatusConflict, "illegal-state-transition",
+			"Illegal branch state transition",
+			"The branch is not in a state that allows this action.")
+		return
+	}
+	s.storeErr(w, r, err)
 }
 
 func (s *Server) handleListEndpoints(w http.ResponseWriter, r *http.Request) {
