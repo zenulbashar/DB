@@ -16,6 +16,16 @@ All notable changes to this repository. Format loosely follows [Keep a Changelog
 - Integration tests against real Postgres fixtures (enum + PK-less + serial tables);
   live CLI smoke verified against the local instance. CI job + Makefile added.
 
+### Added (dump/restore + verification, 2026-07-18)
+- `internal/dumprestore`: pg_dump custom-format → pg_restore (`--no-owner
+  --no-privileges --exit-on-error`, optional parallel jobs, pinned binary dir).
+- `internal/verify` (MIGRATION_STRATEGY §3): table-set parity, exact row counts,
+  deterministic sampled content checksums (hash-ordered, physical-order-independent),
+  sequence `last_value` ≥ source (duplicate-key guard), enum label parity.
+- End-to-end integration: fixture DB (enums, FK pair, sequences, 2k rows) migrated and
+  verified clean; tampering test proves checksum, row-count, and sequence regressions
+  are each caught. Import-engine CI pinned to postgres:16 (client-binary major match).
+
 ## [Phase 2 — in progress]
 
 ### Added (2a: branch & endpoint resource model, 2026-07-17)
