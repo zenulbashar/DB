@@ -10,13 +10,14 @@ import (
 )
 
 const (
-	Org     = "org"
-	User    = "usr"
-	APIKey  = "key"
-	Project = "prj"
-	Branch  = "br"
-	Audit   = "aud"
-	Request = "req"
+	Org      = "org"
+	User     = "usr"
+	APIKey   = "key"
+	Project  = "prj"
+	Branch   = "br"
+	Endpoint = "ep"
+	Audit    = "aud"
+	Request  = "req"
 )
 
 // New returns "<prefix>_<ulid>", e.g. "org_01JZX7Y2MB...".

@@ -2,6 +2,27 @@
 
 All notable changes to this repository. Format loosely follows [Keep a Changelog](https://keepachangelog.com/); one entry per phase gate plus notable intermediate merges.
 
+## [Phase 2 — in progress]
+
+### Added (2a: branch & endpoint resource model, 2026-07-17)
+- Migration `0002_branches`: `branches` + `endpoints` tables with the same FORCE-RLS
+  discipline as 0001; `projects.default_branch_id`.
+- Project creation now atomically provisions the default branch `main` (role `production`,
+  compute defaults 0.25–2 CU, 300 s suspend timeout) with `rw_direct` + `rw_pooled` endpoint
+  records in `provisioning` state; endpoint hosts follow
+  `ep-<ulid>.<region>.db.nimbus.app` (DATABASE_ARCHITECTURE §5).
+- API: `GET/POST /projects/{prj}/branches`, `GET/PATCH/DELETE /branches/{br}`,
+  `GET /branches/{br}/endpoints` with `branches:*`/`endpoints:read` scopes, CU/suspend/retention
+  validation, default-branch delete protection (409; project deletion is the cascade path).
+- OpenAPI: branch/endpoint paths + schemas; TS client regenerated.
+- Tests: unit lifecycle/validation/scope suites; integration coverage for atomic
+  default-branch provisioning, cross-org RLS on the new tables, and cascade semantics.
+
+### Pending in Phase 2
+- 2b: pg-gateway v1 (SNI routing, startup-parameter fallback, connection counters).
+- 2c: reconciler + CNPG provisioning, WAL archiving/PITR, restore-verification job,
+  audit writes moved into mutation transactions.
+
 ## [Phase 1] — 2026-07-17
 
 ### Added

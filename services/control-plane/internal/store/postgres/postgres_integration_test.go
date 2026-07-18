@@ -45,7 +45,7 @@ func ensureAppRole(t *testing.T, ctx context.Context, adminURL string) string {
 		// test role can't touch; start from a clean slate so migrations run
 		// as ndb_test and it owns everything (FORCE RLS applies to owners).
 		`DROP TABLE IF EXISTS schema_migrations, orgs, users, org_members,
-		     api_keys, projects, audit_log, idempotency_keys CASCADE`,
+		     api_keys, projects, branches, endpoints, audit_log, idempotency_keys CASCADE`,
 	} {
 		if _, err := admin.Exec(ctx, q); err != nil {
 			t.Fatalf("%s: %v", q, err)
@@ -95,7 +95,7 @@ func testStore(t *testing.T) *Store {
 	}
 	// Reset state between tests (privileged: RLS would hide other orgs' rows).
 	err = s.withPrivTx(ctx, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `TRUNCATE orgs, users, org_members, api_keys, projects, audit_log, idempotency_keys CASCADE`)
+		_, err := tx.Exec(ctx, `TRUNCATE orgs, users, org_members, api_keys, projects, branches, endpoints, audit_log, idempotency_keys CASCADE`)
 		return err
 	})
 	if err != nil {
@@ -250,6 +250,76 @@ func TestKeyLifecycle(t *testing.T) {
 	}
 	if _, err := s.FindAPIKeyByHash(ctx, "hash-acme"); err != store.ErrKeyInvalid {
 		t.Fatalf("revoked key lookup err = %v, want ErrKeyInvalid", err)
+	}
+}
+
+func TestBranchLifecycleAndRLS(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	res := bootstrapOrg(t, s, "acme")
+
+	// Project creation provisions main + two endpoints atomically.
+	pr, err := s.CreateProject(ctx, store.CreateProjectParams{OrgID: res.Org.ID, Name: "App", Region: "syd1", PGVersion: 17})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pr.DefaultBranchID == nil {
+		t.Fatal("no default branch id")
+	}
+	main, err := s.GetBranch(ctx, res.Org.ID, *pr.DefaultBranchID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if main.Name != "main" || main.Role != domain.BranchProduction || len(main.Endpoints) != 2 {
+		t.Fatalf("unexpected default branch: %+v", main)
+	}
+
+	// Default branch is delete-protected; project delete cascades.
+	if err := s.SoftDeleteBranch(ctx, res.Org.ID, main.ID, time.Now().UTC()); err != store.ErrDefaultBranch {
+		t.Fatalf("delete default err = %v, want ErrDefaultBranch", err)
+	}
+
+	// Branch create from main.
+	br, err := s.CreateBranch(ctx, store.CreateBranchParams{
+		OrgID: res.Org.ID, ProjectID: pr.ID, Name: "preview", Role: domain.BranchPreview,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if br.ParentID == nil || *br.ParentID != main.ID {
+		t.Fatalf("parent = %v, want %s", br.ParentID, main.ID)
+	}
+
+	// RLS: another org's context must see zero branches/endpoints even with
+	// an unscoped query.
+	otherOrg := ids.New(ids.Org)
+	err = s.withPrivTx(ctx, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `INSERT INTO orgs (id, name, slug) VALUES ($1, 'Other', 'other-br')`, otherOrg)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var leakedBranches, leakedEndpoints int
+	err = s.withOrgTx(ctx, otherOrg, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM branches`).Scan(&leakedBranches); err != nil {
+			return err
+		}
+		return tx.QueryRow(ctx, `SELECT count(*) FROM endpoints`).Scan(&leakedEndpoints)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if leakedBranches != 0 || leakedEndpoints != 0 {
+		t.Fatalf("RLS leak: %d branches, %d endpoints visible cross-org", leakedBranches, leakedEndpoints)
+	}
+
+	// Project soft-delete cascades states.
+	if err := s.SoftDeleteProject(ctx, res.Org.ID, pr.ID, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetBranch(ctx, res.Org.ID, main.ID); err != store.ErrNotFound {
+		t.Fatalf("main after project delete err = %v, want ErrNotFound", err)
 	}
 }
 

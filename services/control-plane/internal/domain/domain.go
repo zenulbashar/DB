@@ -112,14 +112,25 @@ const (
 )
 
 type Project struct {
-	ID        string       `json:"id"`
-	OrgID     string       `json:"org_id"`
-	Name      string       `json:"name"`
-	Slug      string       `json:"slug"`
-	Region    string       `json:"region"`
-	PGVersion int          `json:"pg_version"`
-	State     ProjectState `json:"state"`
-	CreatedAt time.Time    `json:"created_at"`
+	ID              string       `json:"id"`
+	OrgID           string       `json:"org_id"`
+	Name            string       `json:"name"`
+	Slug            string       `json:"slug"`
+	Region          string       `json:"region"`
+	PGVersion       int          `json:"pg_version"`
+	State           ProjectState `json:"state"`
+	DefaultBranchID *string      `json:"default_branch_id"`
+	CreatedAt       time.Time    `json:"created_at"`
+}
+
+// EndpointHost derives the stable connect hostname for an endpoint ID
+// (DATABASE_ARCHITECTURE §5): ep_01abc… → ep-01abc….<region>.db.nimbus.app.
+func EndpointHost(endpointID, region string) string {
+	host := endpointID
+	if len(host) > 3 && host[:3] == "ep_" {
+		host = "ep-" + host[3:]
+	}
+	return host + "." + region + ".db.nimbus.app"
 }
 
 type ActorType string

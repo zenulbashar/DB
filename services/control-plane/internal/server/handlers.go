@@ -468,6 +468,8 @@ func (s *Server) storeErr(w http.ResponseWriter, r *http.Request, err error) {
 		writeProblem(w, r, http.StatusConflict, "conflict", "Conflict", "The resource already exists or conflicts with another.")
 	case errors.Is(err, store.ErrLastOwner):
 		writeProblem(w, r, http.StatusConflict, "last-owner", "Would remove the last owner", "Assign another owner first.")
+	case errors.Is(err, store.ErrDefaultBranch):
+		writeProblem(w, r, http.StatusConflict, "default-branch", "Cannot delete the default branch", "Delete the project instead, or change the default branch first.")
 	default:
 		s.internal(w, r, err)
 	}

@@ -373,10 +373,24 @@ func (s *Store) CreateProject(ctx context.Context, p store.CreateProjectParams) 
 			Slug: slugValue, Region: p.Region, PGVersion: p.PGVersion,
 			State: domain.ProjectPending, CreatedAt: time.Now().UTC(),
 		}
-		_, err := tx.Exec(ctx,
+		if _, err := tx.Exec(ctx,
 			`INSERT INTO projects (id, org_id, name, slug, region, pg_version, state, created_at)
 			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-			pr.ID, pr.OrgID, pr.Name, pr.Slug, pr.Region, pr.PGVersion, pr.State, pr.CreatedAt)
+			pr.ID, pr.OrgID, pr.Name, pr.Slug, pr.Region, pr.PGVersion, pr.State, pr.CreatedAt); err != nil {
+			return err
+		}
+		// Default branch "main" (production) + its endpoints, atomically with
+		// the project (store contract).
+		b, err := createBranchTx(ctx, tx, store.CreateBranchParams{
+			OrgID: p.OrgID, ProjectID: pr.ID, Name: "main",
+			Role: domain.BranchProduction, Region: p.Region,
+		})
+		if err != nil {
+			return err
+		}
+		pr.DefaultBranchID = &b.ID
+		_, err = tx.Exec(ctx,
+			`UPDATE projects SET default_branch_id = $2 WHERE id = $1`, pr.ID, b.ID)
 		return err
 	}
 	base := slug.Make(p.Name)
@@ -413,11 +427,13 @@ func (s *Store) CreateProject(ctx context.Context, p store.CreateProjectParams) 
 	return &pr, nil
 }
 
+const projectCols = `id, org_id, name, slug, region, pg_version, state, default_branch_id, created_at`
+
 func (s *Store) GetProject(ctx context.Context, orgID, projectID string) (*domain.Project, error) {
 	var pr domain.Project
 	err := s.withOrgTx(ctx, orgID, func(tx pgx.Tx) error {
 		return scanProject(tx.QueryRow(ctx,
-			`SELECT id, org_id, name, slug, region, pg_version, state, created_at
+			`SELECT `+projectCols+`
 			   FROM projects WHERE id = $1 AND org_id = $2 AND state <> 'deleting'`,
 			projectID, orgID), &pr)
 	})
@@ -429,7 +445,7 @@ func (s *Store) ListProjects(ctx context.Context, orgID string, pg store.Page) (
 	var out []domain.Project
 	err := s.withOrgTx(ctx, orgID, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx,
-			`SELECT id, org_id, name, slug, region, pg_version, state, created_at
+			`SELECT `+projectCols+`
 			   FROM projects
 			  WHERE org_id = $1 AND state <> 'deleting' AND ($2 = '' OR id < $2)
 			  ORDER BY id DESC LIMIT $3`, orgID, pg.Cursor, limit+1)
@@ -457,7 +473,7 @@ func (s *Store) UpdateProjectName(ctx context.Context, orgID, projectID, name st
 	err := s.withOrgTx(ctx, orgID, func(tx pgx.Tx) error {
 		return scanProject(tx.QueryRow(ctx,
 			`UPDATE projects SET name = $3 WHERE id = $1 AND org_id = $2 AND state <> 'deleting'
-			 RETURNING id, org_id, name, slug, region, pg_version, state, created_at`,
+			 RETURNING `+projectCols,
 			projectID, orgID, name), &pr)
 	})
 	return orNotFound(&pr, err)
@@ -474,7 +490,18 @@ func (s *Store) SoftDeleteProject(ctx context.Context, orgID, projectID string, 
 		if ct.RowsAffected() == 0 {
 			return store.ErrNotFound
 		}
-		return nil
+		// Cascade the soft-delete to the project's branches and endpoints so
+		// the reconciler tears them down (default branch included — project
+		// deletion is the one path allowed to remove it).
+		if _, err := tx.Exec(ctx,
+			`UPDATE branches SET state = 'deleting', deleted_at = $2
+			  WHERE project_id = $1 AND state <> 'deleting'`, projectID, at); err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx,
+			`UPDATE endpoints SET state = 'deleting'
+			  WHERE branch_id IN (SELECT id FROM branches WHERE project_id = $1)`, projectID)
+		return err
 	})
 }
 
@@ -593,7 +620,7 @@ func requireAnotherOwner(ctx context.Context, tx pgx.Tx, orgID, exceptUserID str
 }
 
 func scanProject(row pgx.Row, pr *domain.Project) error {
-	return row.Scan(&pr.ID, &pr.OrgID, &pr.Name, &pr.Slug, &pr.Region, &pr.PGVersion, &pr.State, &pr.CreatedAt)
+	return row.Scan(&pr.ID, &pr.OrgID, &pr.Name, &pr.Slug, &pr.Region, &pr.PGVersion, &pr.State, &pr.DefaultBranchID, &pr.CreatedAt)
 }
 
 func scopeStrings(in []domain.Scope) []string {

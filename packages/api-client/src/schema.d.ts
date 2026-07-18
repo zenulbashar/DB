@@ -232,6 +232,71 @@ export interface paths {
         patch: operations["updateProject"];
         trace?: never;
     };
+    "/projects/{prj}/branches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                prj: string;
+            };
+            cookie?: never;
+        };
+        /** List branches of a project */
+        get: operations["listBranches"];
+        put?: never;
+        /**
+         * Create a branch
+         * @description Creates a branch record with its rw_direct + rw_pooled endpoints in
+         *     `provisioning` state. `from_branch` defaults to the project's default
+         *     branch. Point-in-time sources (`at`) arrive in Phase 4.
+         */
+        post: operations["createBranch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/branches/{br}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                br: string;
+            };
+            cookie?: never;
+        };
+        /** Get a branch with its endpoints */
+        get: operations["getBranch"];
+        put?: never;
+        post?: never;
+        /** Delete a branch */
+        delete: operations["deleteBranch"];
+        options?: never;
+        head?: never;
+        /** Update branch settings */
+        patch: operations["updateBranch"];
+        trace?: never;
+    };
+    "/branches/{br}/endpoints": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                br: string;
+            };
+            cookie?: never;
+        };
+        /** List a branch's endpoints */
+        get: operations["listEndpoints"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -304,6 +369,40 @@ export interface components {
              * @enum {string}
              */
             state: "pending" | "provisioning" | "ready" | "error" | "deleting";
+            default_branch_id: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        /** @enum {string} */
+        BranchRole: "production" | "preview" | "development";
+        /** @enum {string} */
+        ResourceState: "provisioning" | "ready" | "suspended" | "error" | "deleting";
+        Compute: {
+            min_cu: number;
+            max_cu: number;
+            suspend_timeout_s: number;
+        };
+        Branch: {
+            id: string;
+            project_id: string;
+            parent: string | null;
+            name: string;
+            role: components["schemas"]["BranchRole"];
+            state: components["schemas"]["ResourceState"];
+            compute: components["schemas"]["Compute"];
+            retention_days: number;
+            /** Format: date-time */
+            created_at: string;
+            /** @description Present on single-branch reads and creation responses. */
+            endpoints?: components["schemas"]["Endpoint"][];
+        };
+        Endpoint: {
+            id: string;
+            branch_id: string;
+            /** @enum {string} */
+            kind: "rw_direct" | "rw_pooled" | "ro_pooled";
+            host: string;
+            state: components["schemas"]["ResourceState"];
             /** Format: date-time */
             created_at: string;
         };
@@ -866,6 +965,182 @@ export interface operations {
                     "application/json": components["schemas"]["Project"];
                 };
             };
+        };
+    };
+    listBranches: {
+        parameters: {
+            query?: {
+                limit?: components["parameters"]["limit"];
+                cursor?: components["parameters"]["cursor"];
+            };
+            header?: never;
+            path: {
+                prj: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Branches (endpoints omitted; fetch a branch for them) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["Branch"][];
+                        next_cursor?: string | null;
+                    };
+                };
+            };
+            404: components["responses"]["Problem"];
+        };
+    };
+    createBranch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                prj: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    from_branch?: string | null;
+                    role?: components["schemas"]["BranchRole"];
+                    compute_min_cu?: number;
+                    compute_max_cu?: number;
+                    suspend_timeout_s?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Created branch (with endpoints) */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Branch"];
+                };
+            };
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+        };
+    };
+    getBranch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                br: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Branch */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Branch"];
+                };
+            };
+            404: components["responses"]["Problem"];
+        };
+    };
+    deleteBranch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                br: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Problem"];
+            /** @description Default branch is delete-protected */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    updateBranch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                br: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name?: string;
+                    compute_min_cu?: number;
+                    compute_max_cu?: number;
+                    suspend_timeout_s?: number;
+                    retention_days?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Updated branch */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Branch"];
+                };
+            };
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+        };
+    };
+    listEndpoints: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                br: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Endpoints */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["Endpoint"][];
+                    };
+                };
+            };
+            404: components["responses"]["Problem"];
         };
     };
 }

@@ -21,6 +21,7 @@ var (
 	ErrKeyInvalid      = errors.New("api key invalid or revoked")
 	ErrValidation      = errors.New("validation failed")
 	ErrIdempotencyBusy = errors.New("idempotency key currently in flight")
+	ErrDefaultBranch   = errors.New("cannot delete the default branch")
 )
 
 type BootstrapParams struct {
@@ -63,6 +64,24 @@ type CreateProjectParams struct {
 	PGVersion int
 }
 
+type CreateBranchParams struct {
+	OrgID     string
+	ProjectID string
+	Name      string
+	ParentID  *string
+	Role      domain.BranchRole
+	Compute   domain.Compute // zero-valued fields take schema defaults
+	Region    string         // for endpoint host derivation
+}
+
+type UpdateBranchParams struct {
+	Name            *string
+	MinCU           *float64
+	MaxCU           *float64
+	SuspendTimeoutS *int
+	RetentionDays   *int
+}
+
 type Page struct {
 	Limit  int
 	Cursor string // exclusive; IDs are ULID-sortable, listing is newest-first
@@ -93,11 +112,22 @@ type Store interface {
 	ListAPIKeys(ctx context.Context, orgID string) ([]domain.APIKey, error)
 	RevokeAPIKey(ctx context.Context, orgID, keyID string, at time.Time) error
 
+	// CreateProject atomically provisions the project record, its default
+	// branch "main" (role production), and that branch's rw_direct +
+	// rw_pooled endpoint records in `provisioning` state.
 	CreateProject(ctx context.Context, p CreateProjectParams) (*domain.Project, error)
 	GetProject(ctx context.Context, orgID, projectID string) (*domain.Project, error)
 	ListProjects(ctx context.Context, orgID string, pg Page) ([]domain.Project, string, error)
 	UpdateProjectName(ctx context.Context, orgID, projectID, name string) (*domain.Project, error)
 	SoftDeleteProject(ctx context.Context, orgID, projectID string, at time.Time) error
+
+	// CreateBranch also creates the branch's rw_direct + rw_pooled endpoints.
+	CreateBranch(ctx context.Context, p CreateBranchParams) (*domain.Branch, error)
+	GetBranch(ctx context.Context, orgID, branchID string) (*domain.Branch, error) // endpoints populated
+	ListBranches(ctx context.Context, orgID, projectID string, pg Page) ([]domain.Branch, string, error)
+	UpdateBranch(ctx context.Context, orgID, branchID string, p UpdateBranchParams) (*domain.Branch, error)
+	SoftDeleteBranch(ctx context.Context, orgID, branchID string, at time.Time) error // ErrDefaultBranch for the default
+	ListEndpoints(ctx context.Context, orgID, branchID string) ([]domain.Endpoint, error)
 
 	AppendAudit(ctx context.Context, e domain.AuditEntry) error
 	ListAudit(ctx context.Context, orgID string, pg Page) ([]domain.AuditEntry, string, error)

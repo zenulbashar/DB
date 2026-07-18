@@ -21,6 +21,7 @@ tags:
   - name: orgs
   - name: api-keys
   - name: projects
+  - name: branches
   - name: audit
 
 paths:
@@ -403,6 +404,142 @@ paths:
         "204": { description: Deleted (soft; lifecycle per MULTI_TENANCY §5) }
         "404": { $ref: "#/components/responses/Problem" }
 
+  /projects/{prj}/branches:
+    parameters:
+      - name: prj
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [branches]
+      operationId: listBranches
+      summary: List branches of a project
+      parameters:
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/cursor"
+      responses:
+        "200":
+          description: Branches (endpoints omitted; fetch a branch for them)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Branch" }
+                  next_cursor: { type: [string, "null"] }
+                required: [data]
+        "404": { $ref: "#/components/responses/Problem" }
+    post:
+      tags: [branches]
+      operationId: createBranch
+      summary: Create a branch
+      description: |
+        Creates a branch record with its rw_direct + rw_pooled endpoints in
+        `provisioning` state. `from_branch` defaults to the project's default
+        branch. Point-in-time sources (`at`) arrive in Phase 4.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, minLength: 1, maxLength: 63 }
+                from_branch: { type: [string, "null"] }
+                role: { $ref: "#/components/schemas/BranchRole" }
+                compute_min_cu: { type: number, minimum: 0.25, maximum: 8 }
+                compute_max_cu: { type: number, minimum: 0.25, maximum: 8 }
+                suspend_timeout_s: { type: integer, minimum: 0, maximum: 86400 }
+              required: [name]
+      responses:
+        "201":
+          description: Created branch (with endpoints)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Branch" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+
+  /branches/{br}:
+    parameters:
+      - name: br
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [branches]
+      operationId: getBranch
+      summary: Get a branch with its endpoints
+      responses:
+        "200":
+          description: Branch
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Branch" }
+        "404": { $ref: "#/components/responses/Problem" }
+    patch:
+      tags: [branches]
+      operationId: updateBranch
+      summary: Update branch settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, minLength: 1, maxLength: 63 }
+                compute_min_cu: { type: number, minimum: 0.25, maximum: 8 }
+                compute_max_cu: { type: number, minimum: 0.25, maximum: 8 }
+                suspend_timeout_s: { type: integer, minimum: 0, maximum: 86400 }
+                retention_days: { type: integer, minimum: 1, maximum: 30 }
+      responses:
+        "200":
+          description: Updated branch
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Branch" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+    delete:
+      tags: [branches]
+      operationId: deleteBranch
+      summary: Delete a branch
+      responses:
+        "204": { description: Deleted }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409":
+          description: Default branch is delete-protected
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
+  /branches/{br}/endpoints:
+    parameters:
+      - name: br
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [branches]
+      operationId: listEndpoints
+      summary: List a branch's endpoints
+      responses:
+        "200":
+          description: Endpoints
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Endpoint" }
+                required: [data]
+        "404": { $ref: "#/components/responses/Problem" }
+
 components:
   securitySchemes:
     apiKey:
@@ -540,8 +677,56 @@ components:
           type: string
           enum: [pending, provisioning, ready, error, deleting]
           description: Phase 1 records stay `pending`; the Phase 2 reconciler drives the rest.
+        default_branch_id: { type: [string, "null"] }
         created_at: { type: string, format: date-time }
-      required: [id, org_id, name, slug, region, pg_version, state, created_at]
+      required: [id, org_id, name, slug, region, pg_version, state, default_branch_id, created_at]
+
+    BranchRole:
+      type: string
+      enum: [production, preview, development]
+
+    ResourceState:
+      type: string
+      enum: [provisioning, ready, suspended, error, deleting]
+
+    Compute:
+      type: object
+      properties:
+        min_cu: { type: number }
+        max_cu: { type: number }
+        suspend_timeout_s: { type: integer }
+      required: [min_cu, max_cu, suspend_timeout_s]
+
+    Branch:
+      type: object
+      properties:
+        id: { type: string }
+        project_id: { type: string }
+        parent: { type: [string, "null"] }
+        name: { type: string }
+        role: { $ref: "#/components/schemas/BranchRole" }
+        state: { $ref: "#/components/schemas/ResourceState" }
+        compute: { $ref: "#/components/schemas/Compute" }
+        retention_days: { type: integer }
+        created_at: { type: string, format: date-time }
+        endpoints:
+          type: array
+          description: Present on single-branch reads and creation responses.
+          items: { $ref: "#/components/schemas/Endpoint" }
+      required: [id, project_id, parent, name, role, state, compute, retention_days, created_at]
+
+    Endpoint:
+      type: object
+      properties:
+        id: { type: string }
+        branch_id: { type: string }
+        kind:
+          type: string
+          enum: [rw_direct, rw_pooled, ro_pooled]
+        host: { type: string }
+        state: { $ref: "#/components/schemas/ResourceState" }
+        created_at: { type: string, format: date-time }
+      required: [id, branch_id, kind, host, state, created_at]
 
     AuditEntry:
       type: object

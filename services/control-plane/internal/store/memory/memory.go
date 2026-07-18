@@ -25,26 +25,30 @@ type idemEntry struct {
 }
 
 type Store struct {
-	mu       sync.Mutex
-	orgs     map[string]domain.Org
-	users    map[string]domain.User
-	members  map[memberKey]domain.Member
-	keys     map[string]domain.APIKey
-	keyHash  map[string]string // hash -> key id
-	projects map[string]domain.Project
-	audit    []domain.AuditEntry
-	idem     map[idemKey]idemEntry
+	mu        sync.Mutex
+	orgs      map[string]domain.Org
+	users     map[string]domain.User
+	members   map[memberKey]domain.Member
+	keys      map[string]domain.APIKey
+	keyHash   map[string]string // hash -> key id
+	projects  map[string]domain.Project
+	branches  map[string]domain.Branch
+	endpoints map[string]domain.Endpoint
+	audit     []domain.AuditEntry
+	idem      map[idemKey]idemEntry
 }
 
 func New() *Store {
 	return &Store{
-		orgs:     map[string]domain.Org{},
-		users:    map[string]domain.User{},
-		members:  map[memberKey]domain.Member{},
-		keys:     map[string]domain.APIKey{},
-		keyHash:  map[string]string{},
-		projects: map[string]domain.Project{},
-		idem:     map[idemKey]idemEntry{},
+		orgs:      map[string]domain.Org{},
+		users:     map[string]domain.User{},
+		members:   map[memberKey]domain.Member{},
+		keys:      map[string]domain.APIKey{},
+		keyHash:   map[string]string{},
+		projects:  map[string]domain.Project{},
+		branches:  map[string]domain.Branch{},
+		endpoints: map[string]domain.Endpoint{},
+		idem:      map[idemKey]idemEntry{},
 	}
 }
 
@@ -280,6 +284,17 @@ func (s *Store) CreateProject(_ context.Context, p store.CreateProjectParams) (*
 		CreatedAt: time.Now().UTC(),
 	}
 	s.projects[pr.ID] = pr
+	// Default branch + endpoints, mirroring the Postgres store's atomicity.
+	b, err := s.createBranchLocked(store.CreateBranchParams{
+		OrgID: p.OrgID, ProjectID: pr.ID, Name: "main",
+		Role: domain.BranchProduction, Region: p.Region,
+	})
+	if err != nil {
+		delete(s.projects, pr.ID)
+		return nil, err
+	}
+	pr.DefaultBranchID = &b.ID
+	s.projects[pr.ID] = pr
 	return &pr, nil
 }
 
@@ -327,6 +342,18 @@ func (s *Store) SoftDeleteProject(_ context.Context, orgID, projectID string, _ 
 	}
 	pr.State = domain.ProjectDeleting
 	s.projects[projectID] = pr
+	for id, b := range s.branches {
+		if b.ProjectID == projectID && b.State != domain.StateDeleting {
+			b.State = domain.StateDeleting
+			s.branches[id] = b
+			for eid, ep := range s.endpoints {
+				if ep.BranchID == b.ID {
+					ep.State = domain.StateDeleting
+					s.endpoints[eid] = ep
+				}
+			}
+		}
+	}
 	return nil
 }
 
