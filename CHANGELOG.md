@@ -16,6 +16,22 @@ All notable changes to this repository. Format loosely follows [Keep a Changelog
 - Integration tests against real Postgres fixtures (enum + PK-less + serial tables);
   live CLI smoke verified against the local instance. CI job + Makefile added.
 
+### Added (logical-replication live-sync, 2026-07-18)
+- `internal/logicalrepl` (MIGRATION_STRATEGY §2 stages 4–5): publication + **explicitly
+  created replication slot** + subscription with `create_slot = false` — automatic slot
+  creation deadlocks when publisher and subscriber share a cluster (found live by the
+  integration suite), and the explicit slot makes Setup cleanly retryable (failed setup
+  rolls back both slot and publication).
+- Initial-copy tracking (`pg_subscription_rel`), source-side lag measurement (slot LSN
+  delta → the API's `lag_bytes`), `WaitSynced`, sequence sync with optional margin,
+  and `Cutover`/`Abort` teardown that also force-drops a leaked slot (the WAL-retention
+  failure mode preflight warns RDS users about).
+- `dumprestore` gains `SchemaOnly` (stage 3 of logical mode).
+- Full migration rehearsal as an integration test: schema copy → subscribe → initial
+  copy → live writes replicate → freeze → lag zero → sequence sync → cutover → slot gone
+  → full parity verify → post-cutover independent writes (no duplicate-key risk).
+  CI enables `wal_level=logical` on the service container so the rehearsal runs there too.
+
 ### Added (dump/restore + verification, 2026-07-18)
 - `internal/dumprestore`: pg_dump custom-format → pg_restore (`--no-owner
   --no-privileges --exit-on-error`, optional parallel jobs, pinned binary dir).

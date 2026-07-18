@@ -133,6 +133,16 @@ jobs:
         with:
           go-version-file: services/import-engine/go.mod
           cache-dependency-path: services/import-engine/go.sum
+      - name: enable logical replication on the service container
+        run: |
+          for setting in "wal_level = 'logical'" "max_replication_slots = 10" "max_wal_senders = 10"; do
+            docker exec ${{ job.services.postgres.id }} psql -U postgres -c "ALTER SYSTEM SET $setting"
+          done
+          docker restart ${{ job.services.postgres.id }}
+          for i in $(seq 1 30); do
+            docker exec ${{ job.services.postgres.id }} pg_isready -U postgres && break
+            sleep 2
+          done
       - name: gofmt
         run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
       - name: vet

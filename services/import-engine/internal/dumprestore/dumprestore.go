@@ -25,6 +25,9 @@ type Options struct {
 	Jobs int
 	// WorkDir holds the intermediate archive; empty uses a temp dir.
 	WorkDir string
+	// SchemaOnly copies DDL without data — logical_replication mode's
+	// stage 3 (the subscription's initial copy moves the data).
+	SchemaOnly bool
 }
 
 type Result struct {
@@ -55,12 +58,15 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 	archive := filepath.Join(workDir, "dump.pgcustom")
 	res := &Result{}
 
-	dump := exec.CommandContext(ctx, o.bin("pg_dump"),
+	dumpArgs := []string{
 		"--format=custom",
 		"--no-owner", "--no-privileges",
-		"--file="+archive,
-		o.SourceURL,
-	)
+		"--file=" + archive,
+	}
+	if o.SchemaOnly {
+		dumpArgs = append(dumpArgs, "--schema-only")
+	}
+	dump := exec.CommandContext(ctx, o.bin("pg_dump"), append(dumpArgs, o.SourceURL)...)
 	var dumpErr bytes.Buffer
 	dump.Stderr = &dumpErr
 	if err := dump.Run(); err != nil {
