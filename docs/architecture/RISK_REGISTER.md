@@ -38,3 +38,18 @@
   unreachable source (safe detach-then-drop ordering) — R-6. Regression tests added for each
   security- and durability-critical fix. This is the phase-gate self-review discipline
   (MASTER §6) applied retroactively across Phases 1–2 + the migration engine.
+- 2026-07-18 — **import-worker hardening audit** (adversarial, each finding refute-verified)
+  over the now-runnable worker + migration runner. 11 confirmed defects (2 critical) fixed
+  the same day with regression tests. Two directly strengthen R-6: a *concurrent double-drive*
+  — the `FOR UPDATE SKIP LOCKED` claim released its lock the moment the row was read, so two
+  replicas could drive the same in-flight migration in parallel (now an atomic lease with
+  `claimed_by`/`claimed_at` + TTL takeover, migration `0006`); and a runner
+  `live_sync → live_sync` self-transition that failed *every* logical migration on its first
+  lag check (the state machine has no self-edges; the runner now holds state on a legal wait).
+  A failed logical migration could leak a WAL-retaining slot on the source when the target was
+  unreachable — `cleanupOnFailure` now drops the source slot independently (R-2/R-6). Two
+  strengthen R-8: `pg_dump`/`pg_restore` passwords moved out of `argv` into `PGPASSWORD`, and
+  `urlToConnInfo` now quotes/escapes every conninfo value (no keyword injection) and redacts
+  the URL from parse errors. Plus a per-poll target-connection leak (R-7) and a
+  target-owner-role mismatch (wrong-role connect) fixed. No new open risks; existing
+  mitigations tightened.

@@ -47,6 +47,30 @@ Both run as Temporal workflows (durable, resumable, human-approvable cutover ste
 `dump_restore` mode is stages 1–3 plus `pg_dump | pg_restore -j N` under a write freeze, then 5's
 verification subset.
 
+### 2.1 Worker orchestration semantics
+
+The stages above are driven by the import worker (`cmd/import-worker`) against the control-plane
+state machine, which owns *what state is legal next* (illegal transitions are rejected, so a
+worker with a stale view cannot corrupt a job). The worker owns *how* each stage runs. Operational
+guarantees:
+
+- **Lease-based single-flight.** A worker *leases* the oldest actionable import (`claimed_by` +
+  `claimed_at`, stamped atomically with the selecting `UPDATE`), and the lease outlives the
+  claiming transaction. A second replica polling mid-stage sees a live foreign lease and skips the
+  job — so two replicas never drive the same in-flight migration in parallel. A crashed worker's
+  lease expires after `leaseTTL` (default 30 min, sized above the longest single stage) and another
+  replica resumes the import from its persisted state.
+- **Legal waits are not transitions.** The state machine has no self-edges. When a stage is
+  legitimately waiting (initial copy not finished, replication lag not yet zero), the worker holds
+  the current state and re-checks on the next poll — it does **not** re-issue the current state as a
+  transition (which would be rejected and fail the migration).
+- **Failure tears the link down.** Any stage error transitions the job to `failed`; for
+  `logical_replication` jobs the worker first drops the replication objects — dialing source and
+  target independently so it can still drop the WAL-retaining slot on the source even when the
+  target is unreachable, the case where an orphaned slot would otherwise pin WAL forever.
+- **Cutover is human-gated.** The worker never advances `cutover_ready`; an operator (or a
+  policy-driven auto-cutover) makes that call, matching stage 5's freeze-and-flip checklist.
+
 ## 3. Verification (non-optional)
 
 - Row-count parity per table; sampled checksum parity; sequence values ≥ source; enum/extension

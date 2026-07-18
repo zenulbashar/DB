@@ -132,32 +132,44 @@ func (s *Store) ListImports(ctx context.Context, orgID, projectID string, pg sto
 	return trimPage(out, limit, func(im domain.Import) string { return im.ID })
 }
 
-// ClaimActionableImport returns the oldest import in a runner-actionable state
-// — non-terminal and NOT cutover_ready (the human gate) — together with the
-// context and encrypted source URL a worker needs to drive the next stage.
-// Returns (nil, nil) when the queue is empty. Privileged: the import worker is
-// a platform component with direct DB access, so decrypted source credentials
-// never traverse the tenant API (SECURITY_MODEL §5).
+// ClaimActionableImport atomically LEASES the oldest actionable import to
+// workerID and returns the context + encrypted source URL a worker needs to
+// drive the next stage. Returns (nil, nil) when nothing is claimable.
+// Privileged: the import worker is a platform component with direct DB access,
+// so decrypted source credentials never traverse the tenant API
+// (SECURITY_MODEL §5).
 //
-// FOR UPDATE SKIP LOCKED lets multiple worker replicas claim distinct imports
-// without stepping on each other; the returned row stays locked only for the
-// life of this transaction (we read and return), so the actual work happens
-// after the lock releases — a worker must be single-flight per import, which
-// the state machine's FOR UPDATE transition guard enforces.
-func (s *Store) ClaimActionableImport(ctx context.Context) (*store.ClaimedImport, error) {
+// A row is claimable when it is actionable (non-terminal, not the cutover_ready
+// human gate) AND (unclaimed OR its lease expired OR it is already ours). The
+// UPDATE stamps claimed_by/claimed_at in the same statement, so the claim
+// SURVIVES the transaction commit — a second replica polling mid-stage sees a
+// fresh foreign lease and skips it, preventing the concurrent double-drive the
+// old FOR-UPDATE-only version allowed (audit finding). A crashed worker's lease
+// expires after leaseTTL and another worker resumes the import.
+func (s *Store) ClaimActionableImport(ctx context.Context, workerID string, leaseTTL time.Duration) (*store.ClaimedImport, error) {
 	var c store.ClaimedImport
 	found := false
 	err := s.withPrivTx(ctx, func(tx pgx.Tx) error {
 		err := tx.QueryRow(ctx, `
-			SELECT i.id, i.project_id, i.org_id, i.target_branch_id, i.source_kind, i.mode, i.state,
+			WITH claimed AS (
+			  UPDATE imports SET claimed_by = $1, claimed_at = now()
+			   WHERE id = (
+			     SELECT id FROM imports
+			      WHERE state NOT IN ('cutover_ready','verified','failed','aborted')
+			        AND (claimed_at IS NULL
+			             OR claimed_at < now() - make_interval(secs => $2)
+			             OR claimed_by = $1)
+			      ORDER BY updated_at
+			      FOR UPDATE SKIP LOCKED
+			      LIMIT 1)
+			  RETURNING id, project_id, org_id, target_branch_id, source_kind, mode, state, source_secret_id
+			)
+			SELECT c.id, c.project_id, c.org_id, c.target_branch_id, c.source_kind, c.mode, c.state,
 			       s.ciphertext, s.key_version, p.region
-			  FROM imports i
-			  JOIN secrets s ON s.id = i.source_secret_id
-			  JOIN projects p ON p.id = i.project_id
-			 WHERE i.state NOT IN ('cutover_ready','verified','failed','aborted')
-			 ORDER BY i.updated_at
-			 FOR UPDATE OF i SKIP LOCKED
-			 LIMIT 1`).Scan(
+			  FROM claimed c
+			  JOIN secrets s ON s.id = c.source_secret_id
+			  JOIN projects p ON p.id = c.project_id`,
+			workerID, leaseTTL.Seconds()).Scan(
 			&c.ImportID, &c.ProjectID, &c.OrgID, &c.TargetBranchID, &c.SourceKind, &c.Mode, &c.State,
 			&c.SourceCiphertext, &c.SourceKeyVersion, &c.Region)
 		if errors.Is(err, pgx.ErrNoRows) {

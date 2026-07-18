@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -66,7 +67,15 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 	if o.SchemaOnly {
 		dumpArgs = append(dumpArgs, "--schema-only")
 	}
-	dump := exec.CommandContext(ctx, o.bin("pg_dump"), append(dumpArgs, o.SourceURL)...)
+	// Keep the password out of argv (visible in ps/proc to any local user):
+	// strip it from the URL and hand it to the child via PGPASSWORD instead
+	// (audit finding).
+	srcURL, srcPw, err := splitPassword(o.SourceURL)
+	if err != nil {
+		return nil, err
+	}
+	dump := exec.CommandContext(ctx, o.bin("pg_dump"), append(dumpArgs, srcURL)...)
+	dump.Env = withPassword(srcPw)
 	var dumpErr bytes.Buffer
 	dump.Stderr = &dumpErr
 	if err := dump.Run(); err != nil {
@@ -78,16 +87,21 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 		res.ArchiveBytes = st.Size()
 	}
 
+	tgtURL, tgtPw, err := splitPassword(o.TargetURL)
+	if err != nil {
+		return nil, err
+	}
 	args := []string{
 		"--no-owner", "--no-privileges",
 		"--exit-on-error",
-		"--dbname=" + o.TargetURL,
+		"--dbname=" + tgtURL,
 	}
 	if o.Jobs > 1 {
 		args = append(args, "--jobs="+strconv.Itoa(o.Jobs))
 	}
 	args = append(args, archive)
 	restore := exec.CommandContext(ctx, o.bin("pg_restore"), args...)
+	restore.Env = withPassword(tgtPw)
 	var restoreErr bytes.Buffer
 	restore.Stderr = &restoreErr
 	if err := restore.Run(); err != nil {
@@ -95,4 +109,29 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 	}
 	res.RestoreStderr = restoreErr.String()
 	return res, nil
+}
+
+// splitPassword removes the password from a postgres:// URL, returning the
+// password-free URL and the password separately.
+func splitPassword(raw string) (urlWithoutPassword, password string, err error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		// Never echo the URL: it carries the credential.
+		return "", "", fmt.Errorf("parse connection url: invalid")
+	}
+	if u.User != nil {
+		pw, _ := u.User.Password()
+		password = pw
+		u.User = url.User(u.User.Username())
+	}
+	return u.String(), password, nil
+}
+
+// withPassword returns the child environment with PGPASSWORD set (and only
+// added when a password exists, so an empty value doesn't shadow a passfile).
+func withPassword(pw string) []string {
+	if pw == "" {
+		return os.Environ()
+	}
+	return append(os.Environ(), "PGPASSWORD="+pw)
 }

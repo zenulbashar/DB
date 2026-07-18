@@ -2,6 +2,56 @@
 
 All notable changes to this repository. Format loosely follows [Keep a Changelog](https://keepachangelog.com/); one entry per phase gate plus notable intermediate merges.
 
+## [Import-worker hardening audit] — 2026-07-18
+
+A focused adversarial audit of the newly-live import worker and its migration runner
+(each finding independently refute-verified before it counted) surfaced **11 confirmed
+defects — 2 critical** — all fixed here with regression tests.
+
+### Correctness / durability (critical)
+- **Concurrent double-drive eliminated.** `ClaimActionableImport` now atomically *leases*
+  an import (`claimed_by`/`claimed_at`, migration `0006_import_lease.sql`) in the same
+  UPDATE that selects it, so the claim survives the transaction commit. The old
+  `FOR UPDATE SKIP LOCKED`-only claim released its lock the instant the row was read, letting
+  a second replica claim the same in-flight import and drive it in parallel (duplicate
+  dump/restore, racing transitions). A crashed worker's lease expires after `leaseTTL`
+  (default 30m, sized above the longest single stage) and another replica resumes it.
+- **No more `live_sync → live_sync` self-transition.** The runner's stage loop
+  (`advance` → `(progressed bool, error)`) now stays in the current state on a legal wait
+  (initial copy not done, replication lag still non-zero) instead of re-issuing the current
+  state as a transition. The state machine has no self-edges, so the old code failed every
+  logical-replication migration on its first lag check.
+
+### Durability
+- **A failed logical migration can no longer leak a WAL-retaining slot.** `Step` now runs
+  `cleanupOnFailure` before marking a job `failed`: it dials source and target independently
+  and calls `logicalrepl.Abort` when both are reachable, or the new
+  `logicalrepl.DropSourceObjects` (source-only slot + publication drop) when the target is
+  down — the case that matters, since the orphaned slot pins WAL on the *source* forever.
+- **Lag-poll connection leak fixed.** `runCutoverReady` dials only the source
+  (`dialSource`); the previous code opened a target connection on every poll and never
+  closed it.
+
+### Security
+- **Passwords kept out of `argv`.** `dumprestore` strips the password from the connection
+  URL and passes it to `pg_dump`/`pg_restore` via `PGPASSWORD`, so it no longer appears in
+  `ps`/`/proc/<pid>/cmdline` to any local user.
+- **conninfo injection closed.** `urlToConnInfo` quotes/escapes every libpq keyword value,
+  so a password (or any field) containing a space, quote, or backslash can neither break the
+  conninfo nor smuggle in an extra keyword. A URL parse failure now returns a fixed,
+  credential-free error instead of a `*url.Error` that embeds the raw URL.
+
+### Correctness
+- **Target owner role resolved by identity.** `ProductionTargetResolver` connects as the
+  role that actually owns the target database (matched on `OwnerRoleID`), not an arbitrary
+  `roles[0]`/`dbs[0]` pairing whose list order Postgres never guarantees.
+
+### Tests
+- New regression coverage: logical-replication end-to-end through the runner to `verified`
+  with slot teardown asserted; failure-path slot cleanup; lease hand-off semantics
+  (`TestImportClaimLease`); conninfo quoting + parse-error redaction; password splitting;
+  and the runner's no-self-transition waits.
+
 ## [Import worker — migration engine goes live] — 2026-07-18
 
 ### Added
