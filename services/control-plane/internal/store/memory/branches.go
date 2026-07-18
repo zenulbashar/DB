@@ -145,6 +145,52 @@ func (s *Store) SoftDeleteBranch(_ context.Context, orgID, branchID string, _ ti
 	return nil
 }
 
+func (s *Store) SuspendBranch(_ context.Context, orgID, branchID string) (*domain.Branch, error) {
+	return s.transitionBranchState(orgID, branchID,
+		domain.StateReady, domain.StateSuspending,
+		domain.StateSuspending, domain.StateSuspended)
+}
+
+func (s *Store) ResumeBranch(_ context.Context, orgID, branchID string) (*domain.Branch, error) {
+	return s.transitionBranchState(orgID, branchID,
+		domain.StateSuspended, domain.StateResuming,
+		domain.StateResuming, domain.StateReady)
+}
+
+// transitionBranchState mirrors postgres.transitionBranchState: a guarded,
+// idempotent compute-state flip on the branch and its endpoints in lockstep.
+func (s *Store) transitionBranchState(orgID, branchID string,
+	from, to domain.ResourceState, noopStates ...domain.ResourceState) (*domain.Branch, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !domain.CanTransitionResource(from, to) {
+		return nil, store.ErrConflict
+	}
+	b, ok := s.branches[branchID]
+	if !ok || b.OrgID != orgID || b.State == domain.StateDeleting {
+		return nil, store.ErrNotFound
+	}
+	if b.State != from {
+		for _, noop := range noopStates {
+			if b.State == noop {
+				b.Endpoints = s.endpointsForLocked(branchID)
+				return &b, nil
+			}
+		}
+		return nil, store.ErrConflict
+	}
+	b.State = to
+	s.branches[branchID] = b
+	for id, ep := range s.endpoints {
+		if ep.BranchID == branchID && ep.State == from {
+			ep.State = to
+			s.endpoints[id] = ep
+		}
+	}
+	b.Endpoints = s.endpointsForLocked(branchID)
+	return &b, nil
+}
+
 func (s *Store) ListEndpoints(_ context.Context, orgID, branchID string) ([]domain.Endpoint, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -93,6 +93,8 @@ func (s *Server) routes() {
 			r.Get("/", s.requireScope(domain.ScopeBranchesRead, s.handleGetBranch))
 			r.Patch("/", s.requireScope(domain.ScopeBranchesWrite, s.handleUpdateBranch))
 			r.Delete("/", s.requireScope(domain.ScopeBranchesWrite, s.handleDeleteBranch))
+			r.Post("/suspend", s.requireScope(domain.ScopeBranchesWrite, s.handleSuspendBranch))
+			r.Post("/resume", s.requireScope(domain.ScopeBranchesWrite, s.handleResumeBranch))
 			r.Get("/endpoints", s.requireScope(domain.ScopeEndpointsRead, s.handleListEndpoints))
 
 			r.Get("/roles", s.requireScope(domain.ScopeRolesRead, s.handleListDBRoles))

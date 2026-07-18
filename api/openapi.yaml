@@ -564,6 +564,54 @@ paths:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
 
+  /branches/{br}/suspend:
+    parameters:
+      - name: br
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [branches]
+      operationId: suspendBranch
+      summary: Suspend a branch's compute (scale-to-zero)
+      description: >
+        Flips a ready branch to `suspending`; the reconciler then hibernates the
+        compute and marks it `suspended`. Idempotent — suspending an
+        already-suspending/suspended branch is a no-op success. A branch that is
+        provisioning/deleting/error returns 409.
+      responses:
+        "200":
+          description: Branch (now suspending or already suspended)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Branch" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+
+  /branches/{br}/resume:
+    parameters:
+      - name: br
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [branches]
+      operationId: resumeBranch
+      summary: Resume (wake) a suspended branch's compute
+      description: >
+        Flips a suspended branch to `resuming`; the reconciler un-hibernates the
+        compute and marks it `ready`. This is also the wake-on-connect trigger
+        the gateway calls (ADR-014); it is idempotent and coalesced, so a
+        connection storm produces at most one wake.
+      responses:
+        "200":
+          description: Branch (now resuming or already ready)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Branch" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+
   /projects/{prj}/imports:
     parameters:
       - name: prj
@@ -1049,7 +1097,11 @@ components:
 
     ResourceState:
       type: string
-      enum: [provisioning, ready, suspended, error, deleting]
+      description: >
+        Lifecycle/compute state shared by branches and endpoints. `suspending`
+        and `resuming` are transient scale-to-zero states the reconciler
+        converges (ADR-014).
+      enum: [provisioning, ready, suspending, suspended, resuming, error, deleting]
 
     Compute:
       type: object

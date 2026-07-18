@@ -409,6 +409,107 @@ func TestReconcilerStoreFlow(t *testing.T) {
 	}
 }
 
+func TestSuspendResumeFlow(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	res := bootstrapOrg(t, s, "acme")
+
+	pr, err := s.CreateProject(ctx, store.CreateProjectParams{OrgID: res.Org.ID, Name: "App", Region: "syd1", PGVersion: 17})
+	if err != nil {
+		t.Fatal(err)
+	}
+	brID := *pr.DefaultBranchID
+	if err := s.MarkBranchReady(ctx, brID); err != nil {
+		t.Fatal(err)
+	}
+
+	// Cannot suspend anything but a ready branch: a fresh (already-ready) branch
+	// suspends; endpoints follow.
+	b, err := s.SuspendBranch(ctx, res.Org.ID, brID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.State != domain.StateSuspending {
+		t.Fatalf("branch state = %s, want suspending", b.State)
+	}
+	// The transition response must carry endpoints reflecting the new state —
+	// identically to the memory store (audit finding on store divergence).
+	if len(b.Endpoints) != 2 {
+		t.Fatalf("suspend response endpoints = %d, want 2", len(b.Endpoints))
+	}
+	for _, ep := range b.Endpoints {
+		if ep.State != domain.StateSuspending {
+			t.Fatalf("endpoint %s state = %s, want suspending", ep.ID, ep.State)
+		}
+	}
+
+	// The reconciler sees suspending as work, and the endpoints stay routable
+	// (so the gateway can hold a connecting client) — mapped down elsewhere.
+	work, _ := s.ListReconcileWork(ctx)
+	if len(work) != 1 || work[0].Branch.State != domain.StateSuspending {
+		t.Fatalf("suspend work = %+v", work)
+	}
+	if routable, _ := s.ListRoutableEndpoints(ctx); len(routable) != 2 {
+		t.Fatalf("suspending endpoints must stay routable, got %d", len(routable))
+	}
+
+	// Idempotent suspend.
+	if _, err := s.SuspendBranch(ctx, res.Org.ID, brID); err != nil {
+		t.Fatalf("idempotent suspend: %v", err)
+	}
+	// Resume before suspended is a conflict.
+	if _, err := s.ResumeBranch(ctx, res.Org.ID, brID); err != store.ErrConflict {
+		t.Fatalf("resume from suspending = %v, want conflict", err)
+	}
+
+	// Reconciler completes hibernation.
+	if err := s.MarkBranchSuspended(ctx, brID); err != nil {
+		t.Fatal(err)
+	}
+	b, _ = s.GetBranch(ctx, res.Org.ID, brID)
+	if b.State != domain.StateSuspended {
+		t.Fatalf("branch state = %s, want suspended", b.State)
+	}
+	for _, ep := range b.Endpoints {
+		if ep.State != domain.StateSuspended {
+			t.Fatalf("endpoint state = %s, want suspended", ep.State)
+		}
+	}
+	// A settled suspended branch is not reconcile work.
+	if work, _ = s.ListReconcileWork(ctx); len(work) != 0 {
+		t.Fatalf("suspended branch still in work queue: %+v", work)
+	}
+
+	// Resume → resuming → (reconciler) ready.
+	b, err = s.ResumeBranch(ctx, res.Org.ID, brID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.State != domain.StateResuming {
+		t.Fatalf("branch state = %s, want resuming", b.State)
+	}
+	if work, _ = s.ListReconcileWork(ctx); len(work) != 1 || work[0].Branch.State != domain.StateResuming {
+		t.Fatalf("resume work = %+v", work)
+	}
+	if err := s.MarkBranchResumed(ctx, brID); err != nil {
+		t.Fatal(err)
+	}
+	b, _ = s.GetBranch(ctx, res.Org.ID, brID)
+	if b.State != domain.StateReady {
+		t.Fatalf("branch state = %s, want ready", b.State)
+	}
+	for _, ep := range b.Endpoints {
+		if ep.State != domain.StateReady {
+			t.Fatalf("endpoint state = %s, want ready", ep.State)
+		}
+	}
+
+	// Cross-org suspend is 404, no mutation.
+	if _, err := s.SuspendBranch(ctx, "org_other", brID); err != store.ErrNotFound {
+		t.Fatalf("cross-org suspend = %v, want not found", err)
+	}
+}
+
 func TestRolesSecretsFlowAndRLS(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()

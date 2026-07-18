@@ -304,6 +304,50 @@ export interface paths {
         patch: operations["updateBranch"];
         trace?: never;
     };
+    "/branches/{br}/suspend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                br: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Suspend a branch's compute (scale-to-zero)
+         * @description Flips a ready branch to `suspending`; the reconciler then hibernates the compute and marks it `suspended`. Idempotent — suspending an already-suspending/suspended branch is a no-op success. A branch that is provisioning/deleting/error returns 409.
+         */
+        post: operations["suspendBranch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/branches/{br}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                br: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resume (wake) a suspended branch's compute
+         * @description Flips a suspended branch to `resuming`; the reconciler un-hibernates the compute and marks it `ready`. This is also the wake-on-connect trigger the gateway calls (ADR-014); it is idempotent and coalesced, so a connection storm produces at most one wake.
+         */
+        post: operations["resumeBranch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{prj}/imports": {
         parameters: {
             query?: never;
@@ -602,8 +646,11 @@ export interface components {
         };
         /** @enum {string} */
         BranchRole: "production" | "preview" | "development";
-        /** @enum {string} */
-        ResourceState: "provisioning" | "ready" | "suspended" | "error" | "deleting";
+        /**
+         * @description Lifecycle/compute state shared by branches and endpoints. `suspending` and `resuming` are transient scale-to-zero states the reconciler converges (ADR-014).
+         * @enum {string}
+         */
+        ResourceState: "provisioning" | "ready" | "suspending" | "suspended" | "resuming" | "error" | "deleting";
         Compute: {
             min_cu: number;
             max_cu: number;
@@ -1433,6 +1480,54 @@ export interface operations {
         };
         responses: {
             /** @description Updated branch */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Branch"];
+                };
+            };
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+        };
+    };
+    suspendBranch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                br: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Branch (now suspending or already suspended) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Branch"];
+                };
+            };
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+        };
+    };
+    resumeBranch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                br: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Branch (now resuming or already ready) */
             200: {
                 headers: {
                     [name: string]: unknown;

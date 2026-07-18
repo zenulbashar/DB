@@ -121,12 +121,23 @@ Gen 1 → Gen 2 is invisible to tenants.
 
 ## 7. Scale-to-zero & autoscaling (Phase 4)
 
-- **Suspend:** no client connections for `suspend_timeout` (default 300 s; disable-able on paid
-  plans) → reconciler performs CNPG hibernation (clean shutdown, PVCs kept), scales pooler to 0,
-  marks gateway route `suspended`. Suspended branches bill storage only.
-- **Wake:** gateway holds the incoming connection, requests resume, reconciler un-hibernates;
-  targets: p50 < 10 s, p95 < 25 s (Gen 1 — set client `connect_timeout ≥ 30s`; documented).
-  WAL archiving and scheduled backups pause while suspended (no changes to archive).
+Suspend and wake are **desired-state transitions on the branch** (`ready → suspending → suspended`
+and `suspended → resuming → ready`) that the reconciler converges — not imperative RPCs (ADR-014).
+The transitional state is the durable record, so both survive a reconciler restart. Endpoints move
+in lockstep, and the route stays published (as `suspended`) throughout `suspending`/`resuming` so
+the gateway can hold and wake a connecting client.
+
+- **Suspend:** the gateway's per-endpoint connection counters detect no client connections for
+  `suspend_timeout` (default 300 s; disable-able on paid plans) → the control plane flips the branch
+  to `suspending` → the reconciler applies **CNPG hibernation** (`cnpg.io/hibernation` annotation:
+  clean shutdown, PVCs kept), **scales the pooler to 0**, and marks the branch `suspended`.
+  Suspended branches bill storage only. (The same suspend action is reused by the billing path —
+  MULTI_TENANCY §5 — not just idle detection.)
+- **Wake:** the gateway holds the incoming connection and calls the control-plane **resume** action
+  (`POST /branches/{br}/resume`), a coalesced, idempotent flip to `resuming`; the reconciler
+  un-hibernates the cluster **and scales the pooler back up**, then marks the branch `ready` once
+  CNPG reports ready. Targets: p50 < 10 s, p95 < 25 s (Gen 1 — set client `connect_timeout ≥ 30s`;
+  documented). WAL archiving and scheduled backups pause while suspended (no changes to archive).
 - **Compute autoscaling:** metrics-driven vertical resize between per-branch min/max CU bounds;
   scale-up immediate (in-place resource resize where the k8s version supports it, else rolling
   restart via replica-first switchover to keep it zero-downtime on HA tiers).

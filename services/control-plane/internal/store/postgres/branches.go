@@ -211,6 +211,90 @@ func (s *Store) SoftDeleteBranch(ctx context.Context, orgID, branchID string, at
 	})
 }
 
+// SuspendBranch flips ready → suspending; ResumeBranch flips suspended →
+// resuming (ADR-014). Both go through transitionBranchState, which is
+// idempotent (already-in-flight or already-there is a no-op success) so the
+// wake path coalesces a connection storm into at most one state change.
+func (s *Store) SuspendBranch(ctx context.Context, orgID, branchID string) (*domain.Branch, error) {
+	return s.transitionBranchState(ctx, orgID, branchID,
+		domain.StateReady, domain.StateSuspending,
+		[]domain.ResourceState{domain.StateSuspending, domain.StateSuspended})
+}
+
+func (s *Store) ResumeBranch(ctx context.Context, orgID, branchID string) (*domain.Branch, error) {
+	return s.transitionBranchState(ctx, orgID, branchID,
+		domain.StateSuspended, domain.StateResuming,
+		[]domain.ResourceState{domain.StateResuming, domain.StateReady})
+}
+
+// transitionBranchState performs an org-scoped, guarded compute-state flip on a
+// branch and its endpoints in lockstep. It only writes when the branch is in
+// `from` (and validates from → to against the domain state machine as
+// defence-in-depth). If the branch is already in one of noopStates it returns
+// the current branch with no error (idempotent). Any other live state is
+// ErrConflict; a missing or deleting branch is ErrNotFound.
+func (s *Store) transitionBranchState(ctx context.Context, orgID, branchID string,
+	from, to domain.ResourceState, noopStates []domain.ResourceState) (*domain.Branch, error) {
+	if !domain.CanTransitionResource(from, to) {
+		return nil, store.ErrConflict // guards against a mis-wired caller
+	}
+	var b domain.Branch
+	// loadBranch reads the branch and its endpoints into b — both paths below
+	// return it with Endpoints populated, matching GetBranch and the memory
+	// store's mirror (so the suspend/resume response reflects the new endpoint
+	// states identically across backends; audit finding on store divergence).
+	loadBranch := func(tx pgx.Tx) error {
+		if err := scanBranch(tx.QueryRow(ctx,
+			`SELECT `+branchCols+` FROM branches WHERE id = $1 AND org_id = $2`, branchID, orgID), &b); err != nil {
+			return err
+		}
+		eps, err := listEndpointsTx(ctx, tx, branchID)
+		if err != nil {
+			return err
+		}
+		b.Endpoints = eps
+		return nil
+	}
+	err := s.withOrgTx(ctx, orgID, func(tx pgx.Tx) error {
+		ct, err := tx.Exec(ctx,
+			`UPDATE branches SET state = $3
+			  WHERE id = $1 AND org_id = $2 AND state = $4`, branchID, orgID, to, from)
+		if err != nil {
+			return err
+		}
+		if ct.RowsAffected() == 0 {
+			// No transition happened: decide no-op vs conflict vs not-found by
+			// reading the current state (still inside the tx / org scope).
+			var cur domain.ResourceState
+			err := tx.QueryRow(ctx,
+				`SELECT state FROM branches WHERE id = $1 AND org_id = $2 AND state <> 'deleting'`,
+				branchID, orgID).Scan(&cur)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return store.ErrNotFound
+			}
+			if err != nil {
+				return err
+			}
+			for _, ok := range noopStates {
+				if cur == ok {
+					return loadBranch(tx) // idempotent no-op
+				}
+			}
+			return store.ErrConflict
+		}
+		if _, err := tx.Exec(ctx,
+			`UPDATE endpoints SET state = $2 WHERE branch_id = $1 AND state = $3`,
+			branchID, to, from); err != nil {
+			return err
+		}
+		return loadBranch(tx)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &b, nil
+}
+
 func listEndpointsTx(ctx context.Context, tx pgx.Tx, branchID string) ([]domain.Endpoint, error) {
 	rows, err := tx.Query(ctx,
 		`SELECT id, branch_id, org_id, kind, host, state, created_at

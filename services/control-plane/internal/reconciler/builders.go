@@ -34,7 +34,20 @@ const (
 	labelProject   = "nimbusdb.io/project"
 	labelBranch    = "nimbusdb.io/branch"
 	labelOrg       = "nimbusdb.io/org"
+
+	// hibernationAnnotation is CNPG's declarative hibernation switch. We toggle
+	// it (rather than mutating spec.instances) because instances=0 is rejected
+	// by the CNPG webhook and because the annotation is the operator-blessed way
+	// to cleanly shut Postgres down while retaining the PVCs (ADR-003, ADR-014).
+	hibernationAnnotation = "cnpg.io/hibernation"
 )
+
+// suspendedCompute reports whether a branch state means its compute should be
+// hibernated / scaled to zero (suspending is mid-flight to suspended; both
+// hold the compute down).
+func suspendedCompute(state domain.ResourceState) bool {
+	return state == domain.StateSuspending || state == domain.StateSuspended
+}
 
 // K8s object names: ULID-based IDs are already lowercase; swap the type
 // separator for a DNS-safe dash. prj_01x → prj-01x, br_01y → br-01y.
@@ -244,13 +257,21 @@ func BuildCluster(w postgres.BranchWork, backup *BackupConfig) *unstructured.Uns
 	if backup != nil {
 		spec["backup"] = backup.barmanSection(w)
 	}
+	// Hibernation is always emitted explicitly (on when suspended, off
+	// otherwise) so a resume deterministically clears a prior "on" via ensure()'s
+	// annotation merge — an absent key would leave the cluster hibernated.
+	hibernation := "off"
+	if suspendedCompute(w.Branch.State) {
+		hibernation = "on"
+	}
 	return &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": ClusterGVK.GroupVersion().String(),
 		"kind":       ClusterGVK.Kind,
 		"metadata": map[string]any{
-			"name":      ClusterName(w.Branch.ID),
-			"namespace": NamespaceName(w.ProjectID),
-			"labels":    commonLabels(w),
+			"name":        ClusterName(w.Branch.ID),
+			"namespace":   NamespaceName(w.ProjectID),
+			"labels":      commonLabels(w),
+			"annotations": map[string]any{hibernationAnnotation: hibernation},
 		},
 		"spec": spec,
 	}}
@@ -260,6 +281,13 @@ func BuildCluster(w postgres.BranchWork, backup *BackupConfig) *unstructured.Uns
 // (DATABASE_ARCHITECTURE §5 — max_prepared_statements on for
 // extended-protocol clients like node-postgres/Drizzle).
 func BuildPooler(w postgres.BranchWork) *unstructured.Unstructured {
+	// Scale the pooler to zero alongside the hibernated cluster (DATABASE_
+	// ARCHITECTURE §7); a running pooler in front of a hibernated cluster would
+	// just refuse connects and burn a pod.
+	instances := int64(1)
+	if suspendedCompute(w.Branch.State) {
+		instances = 0
+	}
 	return &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": PoolerGVK.GroupVersion().String(),
 		"kind":       PoolerGVK.Kind,
@@ -270,7 +298,7 @@ func BuildPooler(w postgres.BranchWork) *unstructured.Unstructured {
 		},
 		"spec": map[string]any{
 			"cluster":   map[string]any{"name": ClusterName(w.Branch.ID)},
-			"instances": int64(1),
+			"instances": instances,
 			"type":      "rw",
 			"pgbouncer": map[string]any{
 				"poolMode": "transaction",
@@ -297,11 +325,25 @@ func BuildRoutesJSON(eps []postgres.RoutableEndpoint) ([]byte, error) {
 	for _, e := range eps {
 		table[e.EndpointID] = routeEntry{
 			Backend:  BackendFor(e.Kind, e.BranchID, e.ProjectID),
-			State:    string(e.State),
+			State:    routeState(e.State),
 			MaxConns: e.MaxConns,
 		}
 	}
 	return json.MarshalIndent(map[string]any{"endpoints": table}, "", "  ")
+}
+
+// routeState maps a control-plane resource state to the two-valued route state
+// the gateway understands (routes.State is ready|suspended). The transitional
+// suspending/resuming states present as "suspended": until the branch is fully
+// ready its backend is not connectable, so the gateway must hold/reject exactly
+// as for a settled suspended endpoint. Keeping the gateway's contract two-valued
+// means this increment needs no gateway change — hold-and-wake replaces the
+// "suspended" rejection in the next increment (ADR-014).
+func routeState(s domain.ResourceState) string {
+	if s == domain.StateReady {
+		return string(domain.StateReady)
+	}
+	return string(domain.StateSuspended)
 }
 
 func BuildRoutesConfigMap(routesJSON []byte) *unstructured.Unstructured {

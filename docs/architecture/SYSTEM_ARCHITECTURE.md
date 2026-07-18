@@ -64,8 +64,8 @@ flowchart TB
     API -- publishes --> NATS
     REC <--> CPDB
     REC -- applies CRs --> TenantNS
-    REC -- wake/suspend --> PG
-    GW -- "wake request" --> REC
+    REC -- hibernate/resume --> PG
+    GW -- "resume flip (desired state)" --> API
     OBS --> MON
     NATS --> MON
     TEMP <--> API
@@ -127,14 +127,29 @@ budget ≤ 1 ms added in-region.
 
 ### 3.3 Wake-on-connect (Phase 4)
 
-1. Branch idle > configured threshold (default 5 min, per-plan) → reconciler hibernates the CNPG
-   cluster (Postgres shut down cleanly; PVCs retained; pooler scaled to zero).
-2. New connection arrives at gateway → route entry marked `suspended` → gateway holds the TCP
-   connection (client sees normal connect latency), fires wake request.
-3. Reconciler resumes the cluster; on `ready`, gateway completes the backend connection.
+The trigger is a **desired-state flip on the branch**, not an imperative RPC (ADR-014). Suspend and
+wake are transitional states (`suspending`, `resuming`) the reconciler converges, exactly like
+provisioning/teardown — so a wake survives a reconciler restart.
+
+1. **Suspend (idle):** gateway connection counters report a branch idle > its `suspend_timeout`
+   (default 5 min, per-plan) → the control plane flips the branch `ready → suspending` → the
+   reconciler applies CNPG hibernation (Postgres shut down cleanly; PVCs retained) and scales the
+   pooler to zero, then marks it `suspended`. Endpoints move in lockstep; the route stays published
+   (marked `suspended`) so the gateway can still hold and wake a connecting client.
+2. **Wake (on connect):** a new connection arrives at the gateway → the route entry is `suspended`
+   → the gateway holds the TCP connection (client sees normal connect latency) and calls the
+   control-plane API's **resume** action, which flips `suspended → resuming`. The call is
+   **coalesced per branch** (idempotent flip), so a connection storm triggers one wake.
+3. **Resume:** the reconciler observes `resuming`, un-hibernates the cluster **and scales the
+   pooler back up**; once the cluster reports `ready` it marks the branch `ready`, the route flips
+   to `ready`, and the gateway completes the held backend connection.
 4. Gen 1 cold-start target: **p50 < 10 s, p95 < 25 s** (documented honestly to tenants; most
-   drivers' default `connect_timeout` needs ≥ 30 s guidance). Gen 2 (Neon storage engine
-   evaluation) targets sub-second. ADR-004.
+   drivers' default `connect_timeout` needs ≥ 30 s guidance) — hitting p95 needs the reconciler to
+   observe the `resuming` flip promptly (short interval / event-driven). Gen 2 (Neon storage engine
+   evaluation) targets sub-second. ADR-004, ADR-014.
+
+The same resume flip serves the human **`POST /branches/{br}/resume`** API call, the gateway's
+on-connect wake, and Nimbus's deploy-time prewarm ping (R-3) — one path, one idempotency.
 
 ### 3.4 Branching (Phase 4)
 
@@ -183,7 +198,11 @@ Full alternatives analysis in [DECISION_LOG.md](DECISION_LOG.md); summary:
 - **Control plane:** API and reconcilers ≥ 2 replicas; control-plane PG is a 3-node CNPG
   cluster; **data plane survives full control-plane outage** (existing routes cached in gateway;
   only new provisioning/wake is degraded — suspended branches can't wake during a full outage,
-  which is why wake-path components are the highest-availability tier of the control plane).
+  which is why the wake path is the highest-availability tier). Concretely the wake path is
+  `gateway → control-plane API → control-plane PG → reconciler` (ADR-014): the gateway can hold a
+  connection with everything down, but completing the wake needs the API to accept the resume flip,
+  the DB to persist it, and a reconciler to converge it — so those three are what must stay up for
+  suspended branches to wake.
 - **Region model:** single region `syd1` (ap-southeast-2) at launch — matches Nimbus, Vercel
   `syd1` pinning of both customer apps, and their current Neon region. Multi-region readiness
   (region-scoped control planes, global routing) is designed in now, built in Phase 8.
