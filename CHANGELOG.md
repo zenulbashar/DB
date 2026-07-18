@@ -2,6 +2,26 @@
 
 All notable changes to this repository. Format loosely follows [Keep a Changelog](https://keepachangelog.com/); one entry per phase gate plus notable intermediate merges.
 
+## [Import worker — migration engine goes live] — 2026-07-18
+
+### Added
+- **`cmd/import-worker` + `internal/importworker`**: the migration engine is now a runnable
+  platform component, not just libraries. The worker adapts the shared import runner
+  (`services/import-engine/runner`, now a public package) onto the control-plane store,
+  claiming actionable imports, decrypting the source credential with the keyring, resolving
+  the target connection, and persisting state transitions.
+- **Secure-by-design credential handling**: the worker has direct database + keyring access,
+  so decrypted source URLs never traverse the tenant HTTP API — the audit's credential-at-rest
+  concern extended to dispatch. `store.ClaimActionableImport` uses `FOR UPDATE SKIP LOCKED`
+  so worker replicas claim distinct jobs; `TransitionImportByID` is the privileged transition.
+- **End-to-end integration test**: the worker drives a *real* dump_restore migration between
+  two live databases to `verified` — claim from the control-plane DB → decrypt → preflight →
+  dump/restore → operator cutover gate → full-table verify → data confirmed on the target.
+  Plus a failure-path test (undecryptable source ⇒ job marked failed, queue not wedged).
+- Cross-module wiring: control-plane now depends on `services/import-engine` (local replace);
+  CI runs the worker integration path with a matching `pg_dump` client, serialized (`-p 1`)
+  against the schema-recreating store suite.
+
 ## [Security & durability audit] — 2026-07-18
 
 An 8-dimension adversarial audit (each finding independently verified before it counted)

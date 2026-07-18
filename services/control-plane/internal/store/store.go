@@ -103,6 +103,22 @@ type TransitionImportParams struct {
 	Error       *string
 }
 
+// ClaimedImport is what a platform import worker needs to drive one stage. The
+// source URL is returned as ciphertext; the worker decrypts it with the
+// keyring (credentials never cross the tenant HTTP API).
+type ClaimedImport struct {
+	ImportID         string
+	ProjectID        string
+	OrgID            string
+	TargetBranchID   *string
+	SourceKind       domain.ImportSourceKind
+	Mode             domain.ImportMode
+	State            domain.ImportState
+	Region           string
+	SourceCiphertext []byte
+	SourceKeyVersion int
+}
+
 type CreateBranchParams struct {
 	OrgID     string
 	ProjectID string

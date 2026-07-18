@@ -40,7 +40,10 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:17
+        # v16 to match the runner's postgresql-client major: the import-worker
+        # integration test shells out to pg_dump/pg_restore, which cannot dump
+        # a newer server than themselves (MIGRATION_STRATEGY §4).
+        image: postgres:16
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -58,6 +61,8 @@ jobs:
         with:
           go-version-file: services/control-plane/go.mod
           cache-dependency-path: services/control-plane/go.sum
+      - name: postgresql client (import-worker dump/restore)
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client-16
       - name: gofmt
         run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
       - name: vet
@@ -68,7 +73,10 @@ jobs:
         env:
           # The harness provisions its own non-superuser role from this admin URL.
           TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/nimbusdb_test?sslmode=disable
-        run: go test -count=1 -tags=integration ./internal/store/postgres/...
+        # -p 1 serializes packages: the store suite recreates its schema, and
+        # the import-worker test provisions its own databases, so they must not
+        # run concurrently against the shared server.
+        run: go test -count=1 -p 1 -tags=integration ./internal/store/postgres/... ./internal/importworker/...
       - name: build
         run: go build ./...
 

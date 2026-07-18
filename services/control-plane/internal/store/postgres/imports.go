@@ -132,6 +132,63 @@ func (s *Store) ListImports(ctx context.Context, orgID, projectID string, pg sto
 	return trimPage(out, limit, func(im domain.Import) string { return im.ID })
 }
 
+// ClaimActionableImport returns the oldest import in a runner-actionable state
+// — non-terminal and NOT cutover_ready (the human gate) — together with the
+// context and encrypted source URL a worker needs to drive the next stage.
+// Returns (nil, nil) when the queue is empty. Privileged: the import worker is
+// a platform component with direct DB access, so decrypted source credentials
+// never traverse the tenant API (SECURITY_MODEL §5).
+//
+// FOR UPDATE SKIP LOCKED lets multiple worker replicas claim distinct imports
+// without stepping on each other; the returned row stays locked only for the
+// life of this transaction (we read and return), so the actual work happens
+// after the lock releases — a worker must be single-flight per import, which
+// the state machine's FOR UPDATE transition guard enforces.
+func (s *Store) ClaimActionableImport(ctx context.Context) (*store.ClaimedImport, error) {
+	var c store.ClaimedImport
+	found := false
+	err := s.withPrivTx(ctx, func(tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `
+			SELECT i.id, i.project_id, i.org_id, i.target_branch_id, i.source_kind, i.mode, i.state,
+			       s.ciphertext, s.key_version, p.region
+			  FROM imports i
+			  JOIN secrets s ON s.id = i.source_secret_id
+			  JOIN projects p ON p.id = i.project_id
+			 WHERE i.state NOT IN ('cutover_ready','verified','failed','aborted')
+			 ORDER BY i.updated_at
+			 FOR UPDATE OF i SKIP LOCKED
+			 LIMIT 1`).Scan(
+			&c.ImportID, &c.ProjectID, &c.OrgID, &c.TargetBranchID, &c.SourceKind, &c.Mode, &c.State,
+			&c.SourceCiphertext, &c.SourceKeyVersion, &c.Region)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		found = true
+		return nil
+	})
+	if err != nil || !found {
+		return nil, err
+	}
+	return &c, nil
+}
+
+// TransitionImportByID is the privileged (org-agnostic) transition used by the
+// platform import worker, which operates across tenants by design.
+func (s *Store) TransitionImportByID(ctx context.Context, importID string, p store.TransitionImportParams) (*domain.Import, error) {
+	var im domain.Import
+	err := s.withPrivTx(ctx, func(tx pgx.Tx) error {
+		if err := scanImport(tx.QueryRow(ctx,
+			`SELECT `+importCols+` FROM imports WHERE id = $1 FOR UPDATE`, importID), &im); err != nil {
+			return err
+		}
+		return applyTransition(ctx, tx, &im, p)
+	})
+	return orNotFound(&im, err)
+}
+
 func (s *Store) TransitionImport(ctx context.Context, orgID, importID string, p store.TransitionImportParams) (*domain.Import, error) {
 	var im domain.Import
 	err := s.withOrgTx(ctx, orgID, func(tx pgx.Tx) error {
@@ -141,37 +198,44 @@ func (s *Store) TransitionImport(ctx context.Context, orgID, importID string, p 
 			importID, orgID), &im); err != nil {
 			return err
 		}
-		if !domain.CanTransition(im.Mode, im.State, p.To) {
-			return store.ErrConflict
-		}
-		im.State = p.To
-		if p.Report != nil {
-			im.Report = p.Report
-		}
-		if p.Checkpoints != nil {
-			if im.Checkpoints == nil {
-				im.Checkpoints = map[string]any{}
-			}
-			for k, v := range p.Checkpoints {
-				im.Checkpoints[k] = v
-			}
-		}
-		im.Error = p.Error
-		im.UpdatedAt = time.Now().UTC()
-
-		report, _ := json.Marshal(im.Report)
-		checkpoints, _ := json.Marshal(im.Checkpoints)
-		if im.Report == nil {
-			report = nil
-		}
-		if im.Checkpoints == nil {
-			checkpoints = nil
-		}
-		_, err := tx.Exec(ctx,
-			`UPDATE imports SET state = $3, report = $4, checkpoints = $5, error = $6, updated_at = $7
-			  WHERE id = $1 AND org_id = $2`,
-			importID, orgID, im.State, report, checkpoints, im.Error, im.UpdatedAt)
-		return err
+		return applyTransition(ctx, tx, &im, p)
 	})
 	return orNotFound(&im, err)
+}
+
+// applyTransition validates the state-machine step and persists it. The row
+// must already be located and locked FOR UPDATE by the caller (so the WHERE
+// needs only the id).
+func applyTransition(ctx context.Context, tx pgx.Tx, im *domain.Import, p store.TransitionImportParams) error {
+	if !domain.CanTransition(im.Mode, im.State, p.To) {
+		return store.ErrConflict
+	}
+	im.State = p.To
+	if p.Report != nil {
+		im.Report = p.Report
+	}
+	if p.Checkpoints != nil {
+		if im.Checkpoints == nil {
+			im.Checkpoints = map[string]any{}
+		}
+		for k, v := range p.Checkpoints {
+			im.Checkpoints[k] = v
+		}
+	}
+	im.Error = p.Error
+	im.UpdatedAt = time.Now().UTC()
+
+	report, _ := json.Marshal(im.Report)
+	checkpoints, _ := json.Marshal(im.Checkpoints)
+	if im.Report == nil {
+		report = nil
+	}
+	if im.Checkpoints == nil {
+		checkpoints = nil
+	}
+	_, err := tx.Exec(ctx,
+		`UPDATE imports SET state = $2, report = $3, checkpoints = $4, error = $5, updated_at = $6
+		  WHERE id = $1`,
+		im.ID, im.State, report, checkpoints, im.Error, im.UpdatedAt)
+	return err
 }
