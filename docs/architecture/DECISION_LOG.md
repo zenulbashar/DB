@@ -127,6 +127,16 @@ hibernation + route mapping); the gateway hold-and-wake and the idle-suspend det
 follow-on increments that build on it. Supersedes the §2 mermaid's direct gateway→reconciler edge,
 which is redrawn to `gateway → API`.
 
+**Addendum (concrete transport).** The gateway's wake call targets a dedicated PRIVILEGED,
+cross-tenant endpoint `POST /internal/branches/{br}/wake`, not the org-scoped tenant
+`POST /branches/{br}/resume` — the gateway serves every tenant and cannot present an org-scoped
+credential. The endpoint resolves the branch's org internally and performs the same idempotent
+`suspended → resuming` flip, so the human resume and the gateway wake converge through one
+transition. It is authenticated by a shared `NDB_GATEWAY_TOKEN` bearer (interim, pending mTLS —
+SECURITY_MODEL §3) and disabled when the token is unset. The route table gains a `branch_id` field
+so the gateway knows which branch to wake for a connecting endpoint. This increment adds the
+endpoint + route field; the gateway-side hold/coalesce/poll logic is the next increment.
+
 ---
 
 ## Open questions — **all answered by owner, 2026-07-17**

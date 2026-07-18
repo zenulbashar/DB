@@ -38,7 +38,15 @@
 - **API keys:** `ndb_` prefix + 256-bit random; SHA-256 hash stored; scopes required at creation;
   shown once. (Deliberately the same shape as Nimbus's `nbt_` tokens — one mental model.)
 - **Service-to-service (internal):** mTLS via cluster PKI (cert-manager); SPIFFE-style
-  identities per service; no shared static internal secrets.
+  identities per service; no shared static internal secrets. **Exception (interim):** the
+  pg-gateway's wake trigger (ADR-014) authenticates to the control-plane's internal wake endpoint
+  (`POST /internal/branches/{br}/wake`) with a single shared bearer token (`NDB_GATEWAY_TOKEN`,
+  bootstrap-token shape, constant-time compared) until mTLS covers the gateway→control-plane hop.
+  The endpoint is disabled entirely when the token is unset, is reachable only on the internal
+  network, is the gateway's *only* control-plane call, and grants exactly one capability — flip a
+  suspended branch to `resuming` by ID (a coalesced, idempotent desired-state write; it cannot
+  read secrets, provision, or delete). Every call is audited (actor = system, action
+  `branch.wake`).
 - **Platform operators:** SSO + MFA; role-based (admin portal roles: support-read,
   operator, security); production kubectl access via short-lived certs through an audited
   bastion flow, alarmed by default.

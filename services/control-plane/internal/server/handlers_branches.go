@@ -2,7 +2,9 @@ package server
 
 import (
 	"context"
+	"crypto/subtle"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -160,6 +162,36 @@ func (s *Server) branchComputeAction(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	s.auditKey(r, p.OrgID, auditAction, "branch", brID, map[string]any{"state": b.State})
+	writeJSON(w, http.StatusOK, b)
+}
+
+// authenticateGateway guards the /internal surface with the shared gateway
+// token (ADR-014, SECURITY_MODEL §3). When the token is unset the surface is
+// disabled entirely; a wrong/missing bearer is 401. Constant-time compared.
+func (s *Server) authenticateGateway(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		presented := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if s.cfg.GatewayToken == "" ||
+			subtle.ConstantTimeCompare([]byte(presented), []byte(s.cfg.GatewayToken)) != 1 {
+			writeProblem(w, r, http.StatusUnauthorized, "unauthorized", "Unauthorized", "")
+			return
+		}
+		next(w, r)
+	}
+}
+
+// handleWakeBranchInternal is the gateway's wake-on-connect trigger: a
+// privileged, cross-tenant idempotent flip of a suspended branch to resuming
+// (ADR-014). Authenticated by authenticateGateway (no org principal).
+func (s *Server) handleWakeBranchInternal(w http.ResponseWriter, r *http.Request) {
+	brID := chi.URLParam(r, "br")
+	b, err := s.store.WakeBranchByID(r.Context(), brID)
+	if err != nil {
+		s.branchErr(w, r, err)
+		return
+	}
+	s.audit(r, b.OrgID, domain.ActorSystem, "pg-gateway", "branch.wake", "branch", brID,
+		map[string]any{"state": b.State})
 	writeJSON(w, http.StatusOK, b)
 }
 
