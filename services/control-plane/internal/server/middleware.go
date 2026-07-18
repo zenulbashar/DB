@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/zenulbashar/DB/services/control-plane/internal/auth"
@@ -127,6 +128,16 @@ func (s *Server) requireScope(scope domain.Scope, h http.HandlerFunc) http.Handl
 
 // idempotent replays stored responses for repeated Idempotency-Key POSTs
 // (API_SPECIFICATION §1). Only successful (2xx) responses are stored.
+// idempotent replays stored responses for repeated Idempotency-Key POSTs
+// (API_SPECIFICATION §1). Two properties matter for a credential-issuing API:
+//   - Concurrency: same-key requests are serialized per instance (keyed lock)
+//     so two racing POSTs cannot both execute and create duplicate resources
+//     (audit finding: idempotency TOCTOU).
+//   - At-rest secrecy: create responses carry one-time secrets (API tokens,
+//     DB passwords). The cached copy is envelope-encrypted with the same
+//     keyring that protects role secrets, so no plaintext credential persists
+//     in idempotency_keys (audit finding: credential-at-rest). The client
+//     still receives plaintext on the live call and on replay.
 func (s *Server) idempotent(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		key := r.Header.Get("Idempotency-Key")
@@ -136,20 +147,87 @@ func (s *Server) idempotent(h http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		route := r.Method + " " + r.URL.Path
+		unlock := s.idemKeys.lock(p.OrgID + "\x00" + route + "\x00" + key)
+		defer unlock()
+
 		if prev, err := s.store.GetIdempotent(r.Context(), p.OrgID, route, key); err == nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("Idempotency-Replayed", "true")
 			w.WriteHeader(prev.Status)
-			_, _ = w.Write(prev.Body)
+			_, _ = w.Write(s.decodeIdem(prev.Body))
 			return
 		}
 		rec := &recordingWriter{ResponseWriter: w, status: http.StatusOK}
 		h(rec, r)
 		if rec.status >= 200 && rec.status < 300 {
 			_ = s.store.PutIdempotent(r.Context(), p.OrgID, route, key,
-				store.IdempotentResponse{Status: rec.status, Body: rec.buf.Bytes()},
+				store.IdempotentResponse{Status: rec.status, Body: s.encodeIdem(rec.buf.Bytes())},
 				time.Now().Add(24*time.Hour))
 		}
+	}
+}
+
+// encodeIdem/decodeIdem envelope-encrypt the cached body when a keyring is
+// configured. A leading 0x01 marks encrypted blobs so mixed-vintage rows read
+// correctly across a rollout.
+func (s *Server) encodeIdem(body []byte) []byte {
+	if s.cfg.Keyring == nil {
+		return append([]byte{0x00}, body...)
+	}
+	ct, _, err := s.cfg.Keyring.Encrypt(body)
+	if err != nil {
+		s.log.Error("idempotency encrypt failed; not caching", "err", err)
+		return append([]byte{0x00}, body...)
+	}
+	return append([]byte{0x01}, ct...)
+}
+
+func (s *Server) decodeIdem(stored []byte) []byte {
+	if len(stored) == 0 {
+		return stored
+	}
+	body := stored[1:]
+	if stored[0] == 0x01 && s.cfg.Keyring != nil {
+		if pt, err := s.cfg.Keyring.Decrypt(body); err == nil {
+			return pt
+		}
+	}
+	return body
+}
+
+// keyedMutex serializes work per string key with reference-counted cleanup so
+// the map never grows without bound.
+type keyedMutex struct {
+	mu    sync.Mutex
+	locks map[string]*lockEntry
+}
+
+type lockEntry struct {
+	mu   sync.Mutex
+	refs int
+}
+
+func newKeyedMutex() *keyedMutex { return &keyedMutex{locks: map[string]*lockEntry{}} }
+
+func (k *keyedMutex) lock(key string) func() {
+	k.mu.Lock()
+	e := k.locks[key]
+	if e == nil {
+		e = &lockEntry{}
+		k.locks[key] = e
+	}
+	e.refs++
+	k.mu.Unlock()
+
+	e.mu.Lock()
+	return func() {
+		e.mu.Unlock()
+		k.mu.Lock()
+		e.refs--
+		if e.refs == 0 {
+			delete(k.locks, key)
+		}
+		k.mu.Unlock()
 	}
 }
 

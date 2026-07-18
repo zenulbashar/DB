@@ -149,10 +149,25 @@ func StripEndpointOption(init *Initial) []byte {
 	for k, v := range init.Params {
 		params[k] = v
 	}
+	toks := strings.Fields(params["options"])
 	var kept []string
-	for _, tok := range strings.Fields(params["options"]) {
-		bare := strings.TrimPrefix(tok, "-c")
-		if strings.HasPrefix(bare, "endpoint=") {
+	for i := 0; i < len(toks); i++ {
+		tok := toks[i]
+		// libpq accepts the endpoint token three ways: bare "endpoint=X",
+		// combined "-cendpoint=X", and the space-separated "-c endpoint=X"
+		// pair. The original code dropped only the value of the last form and
+		// left a dangling "-c" that the backend rejects (audit finding); this
+		// handles the pair as a unit.
+		if tok == "-c" && i+1 < len(toks) {
+			if strings.HasPrefix(toks[i+1], "endpoint=") {
+				i++ // drop both "-c" and its "endpoint=" value
+				continue
+			}
+			kept = append(kept, tok, toks[i+1])
+			i++
+			continue
+		}
+		if strings.HasPrefix(strings.TrimPrefix(tok, "-c"), "endpoint=") {
 			continue
 		}
 		kept = append(kept, tok)

@@ -479,6 +479,99 @@ func TestRolesSecretsFlowAndRLS(t *testing.T) {
 	}
 }
 
+// Regression for the audit finding that FinishBranchTeardown's DELETE raised
+// a foreign-key violation (wedging the reconciler forever) once an import row
+// referenced the branch, and that it orphaned the roles' secrets.
+func TestBranchTeardownSurvivesReferencesAndCleansSecrets(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	res := bootstrapOrg(t, s, "acme")
+
+	// Project with a seeded owner role + database (=> a secret row) on main.
+	seed := &store.ProjectSeed{
+		RoleName: "app_owner", DatabaseName: "app",
+		Secret: store.SecretMaterial{Ciphertext: []byte("sealed"), KeyVersion: 1},
+	}
+	pr, err := s.CreateProject(ctx, store.CreateProjectParams{
+		OrgID: res.Org.ID, Name: "App", Region: "syd1", PGVersion: 17, Seed: seed,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mainBranch := *pr.DefaultBranchID
+
+	// An import targeting the branch — the FK that used to block the delete.
+	if _, err := s.CreateImport(ctx, store.CreateImportParams{
+		OrgID: res.Org.ID, ProjectID: pr.ID, SourceKind: domain.ImportNeon,
+		Mode:         domain.ImportDumpRestore,
+		SourceSecret: store.SecretMaterial{Ciphertext: []byte("src"), KeyVersion: 1},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var secretsBefore int
+	if err := s.withPrivTx(ctx, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT count(*) FROM secrets`).Scan(&secretsBefore)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if secretsBefore == 0 {
+		t.Fatal("expected the seeded role secret to exist")
+	}
+
+	// Soft-delete then finish teardown — must NOT raise 23503.
+	if err := s.SoftDeleteProject(ctx, res.Org.ID, pr.ID, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.FinishBranchTeardown(ctx, mainBranch); err != nil {
+		t.Fatalf("teardown wedged on a referencing row: %v", err)
+	}
+
+	// Branch gone; import's target_branch_id nulled; role secret cleaned up.
+	if _, err := s.GetBranch(ctx, res.Org.ID, mainBranch); err != store.ErrNotFound {
+		t.Fatalf("branch survived teardown: %v", err)
+	}
+	if err := s.withPrivTx(ctx, func(tx pgx.Tx) error {
+		var dangling int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM imports WHERE target_branch_id = $1`, mainBranch).Scan(&dangling); err != nil {
+			return err
+		}
+		if dangling != 0 {
+			t.Errorf("import still references the deleted branch (%d)", dangling)
+		}
+		var roleSecrets int
+		if err := tx.QueryRow(ctx,
+			`SELECT count(*) FROM secrets WHERE kind = 'db_password'`).Scan(&roleSecrets); err != nil {
+			return err
+		}
+		if roleSecrets != 0 {
+			t.Errorf("role secret orphaned after teardown (%d remain)", roleSecrets)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The slug gap-filling loop must match the memory store: three same-name
+// projects yield three distinct slugs, not a 409 (audit: store parity).
+func TestSlugCollisionFillsGaps(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	res := bootstrapOrg(t, s, "acme")
+	slugs := map[string]bool{}
+	for i := 0; i < 3; i++ {
+		pr, err := s.CreateProject(ctx, store.CreateProjectParams{OrgID: res.Org.ID, Name: "Same Name", Region: "syd1", PGVersion: 17})
+		if err != nil {
+			t.Fatalf("create %d: %v", i, err)
+		}
+		if slugs[pr.Slug] {
+			t.Fatalf("duplicate slug %q", pr.Slug)
+		}
+		slugs[pr.Slug] = true
+	}
+}
+
 func TestLastOwnerRule(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()

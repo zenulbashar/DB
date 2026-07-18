@@ -351,7 +351,7 @@ paths:
               properties:
                 org_id: { type: string }
                 name: { type: string, minLength: 1, maxLength: 120 }
-                region: { type: string, default: syd1 }
+                region: { type: string, enum: [syd1], default: syd1 }
                 pg_version: { type: integer, enum: [16, 17], default: 17 }
               required: [org_id, name]
       responses:
@@ -949,6 +949,8 @@ components:
       type: string
       enum:
         - orgs:read
+        - orgs:write
+        - members:manage
         - projects:read
         - projects:write
         - projects:provision

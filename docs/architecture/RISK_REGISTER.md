@@ -21,4 +21,20 @@
 | **R-15** | **Design export arrives late and forces console rework.** | L | 3 | Token-isolated theming (DESIGN_SYSTEM_MAPPING §5); re-skin contained by construction. | Export arrival. |
 
 **Retired risks:** none yet.
-**Review log:** 2026-07-17 — initial register (Phase 0).
+
+**Review log:**
+- 2026-07-17 — initial register (Phase 0).
+- 2026-07-18 — **adversarial code audit** (8 dimensions, each finding independently
+  verified) over the ~7.4k-line implementation. 19 confirmed defects found and fixed the
+  same day, notably: idempotency cache persisted plaintext credentials at rest (now
+  envelope-encrypted) and admitted racing duplicate POSTs (now serialized per key) — both
+  strengthen R-8; reconciler branch-teardown wedged forever on a foreign-key violation once
+  an import referenced the branch (FKs now `ON DELETE SET NULL`, orphaned secrets cleaned) —
+  R-5; tenant NetworkPolicies blocked CNPG replication/operator/metrics and left egress
+  wide open (ingress/egress allow-lists corrected) — R-9/R-5; the migration parity check used
+  a bounded sample that could miss single-row corruption in large tables (now full-table by
+  default) — directly strengthens R-2/R-6; logical-replication cutover tore down the link
+  before verifying (reordered: verify-then-cutover) and could leak a WAL-retaining slot on an
+  unreachable source (safe detach-then-drop ordering) — R-6. Regression tests added for each
+  security- and durability-critical fix. This is the phase-gate self-review discipline
+  (MASTER §6) applied retroactively across Phases 1–2 + the migration engine.

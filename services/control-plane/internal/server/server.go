@@ -24,14 +24,15 @@ type Config struct {
 }
 
 type Server struct {
-	store store.Store
-	cfg   Config
-	log   *slog.Logger
-	mux   *chi.Mux
+	store    store.Store
+	cfg      Config
+	log      *slog.Logger
+	mux      *chi.Mux
+	idemKeys *keyedMutex
 }
 
 func New(st store.Store, cfg Config, log *slog.Logger) *Server {
-	s := &Server{store: st, cfg: cfg, log: log, mux: chi.NewRouter()}
+	s := &Server{store: st, cfg: cfg, log: log, mux: chi.NewRouter(), idemKeys: newKeyedMutex()}
 	s.routes()
 	return s
 }
@@ -44,7 +45,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.mux.Serve
 func (s *Server) routes() {
 	s.mux.Use(s.requestID, s.logging, s.recoverer)
 
+	// /healthz for k8s probes; /v1/healthz so the documented API base
+	// (which includes /v1) resolves for generated clients.
 	s.mux.Get("/healthz", s.handleHealth)
+	s.mux.Get("/v1/healthz", s.handleHealth)
 	s.mux.Post("/v1/bootstrap", s.handleBootstrap)
 
 	s.mux.Route("/v1", func(r chi.Router) {

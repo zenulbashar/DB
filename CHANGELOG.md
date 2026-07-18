@@ -2,6 +2,50 @@
 
 All notable changes to this repository. Format loosely follows [Keep a Changelog](https://keepachangelog.com/); one entry per phase gate plus notable intermediate merges.
 
+## [Security & durability audit] — 2026-07-18
+
+An 8-dimension adversarial audit (each finding independently verified before it counted)
+over the whole implementation surfaced **19 confirmed defects**, all fixed here with
+regression tests.
+
+### Security
+- **Idempotency cache no longer stores plaintext credentials.** Create responses carry
+  one-time API tokens / DB passwords; the cached body in `idempotency_keys` is now
+  envelope-encrypted with the keyring (leak-tested), and same-key POSTs are serialized per
+  instance so two racing requests can't both create resources.
+- **setval sequence-sync** passes the sequence name as a `regclass` parameter instead of
+  interpolating a source-controlled identifier into SQL.
+
+### Durability / correctness
+- **Reconciler branch teardown no longer wedges forever.** `branches.parent_id` and
+  `imports.target_branch_id` become `ON DELETE SET NULL` (migration 0005) so a referenced
+  branch can still be deleted after its compute is gone; orphaned role secrets are cleaned
+  up in the same transaction.
+- **Migration parity verification is full-table by default** — a bounded sample could miss a
+  single-row content corruption in any table larger than the cap. This is the cutover gate
+  for real customer data, so the default now checksums every row.
+- **Logical-replication cutover reordered to verify-then-cutover** (a failed verify was
+  previously unrecoverable) and **teardown detaches the slot before dropping the
+  subscription**, so an unreachable source no longer leaks a WAL-retaining replication slot.
+
+### Data-plane isolation
+- **Tenant NetworkPolicies corrected**: the ingress-only default-deny + gateway allow blocked
+  CNPG streaming replication, the operator, and metrics scraping, and left egress wide open.
+  Now default-deny covers **both** directions with explicit allow-lists (gateway,
+  same-namespace replication, CNPG operator, monitoring; egress for DNS, replication,
+  operator, and 443 for WAL archive).
+- **Gateway per-endpoint connection cap is now populated** from the branch compute ceiling
+  (it was always 0 = unlimited, making the cap dead code).
+
+### Consistency / spec
+- Postgres project-slug collision resolution now uses the same gap-filling loop as the memory
+  store (they diverged: one 409'd where the other succeeded).
+- Gateway `StripEndpointOption` handles the `-c endpoint=X` space-separated form without
+  leaving a dangling `-c` the backend would reject.
+- OpenAPI: `orgs:write` / `members:manage` added to the `Scope` enum; region constrained to
+  `[syd1]` to match the handler; `/v1/healthz` alias so the documented API base resolves for
+  generated clients.
+
 ## [Phase 5 groundwork — pulled forward]
 
 ### Added (import-engine preflight, 2026-07-18)

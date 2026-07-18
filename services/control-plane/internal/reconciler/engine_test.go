@@ -129,14 +129,37 @@ func TestProvisionCreatesResources(t *testing.T) {
 		t.Fatal("max_prepared_statements must be enabled for extended-protocol clients")
 	}
 
-	// Namespace protections exist.
-	for _, name := range []string{"default-deny-ingress", "allow-gateway"} {
+	// Namespace protections exist: default-deny both directions, plus the
+	// ingress/egress allow-lists that keep CNPG functional.
+	npNames := []string{"default-deny", "allow-postgres-ingress", "allow-postgres-egress"}
+	for _, name := range npNames {
 		np := &unstructured.Unstructured{}
 		np.SetAPIVersion("networking.k8s.io/v1")
 		np.SetKind("NetworkPolicy")
 		if err := kc.Get(ctx, client.ObjectKey{Namespace: "prj-01test", Name: name}, np); err != nil {
 			t.Fatalf("network policy %s: %v", name, err)
 		}
+	}
+	// The default-deny must cover BOTH ingress and egress (egress was missing
+	// before the audit).
+	deny := &unstructured.Unstructured{}
+	deny.SetAPIVersion("networking.k8s.io/v1")
+	deny.SetKind("NetworkPolicy")
+	if err := kc.Get(ctx, client.ObjectKey{Namespace: "prj-01test", Name: "default-deny"}, deny); err != nil {
+		t.Fatal(err)
+	}
+	types, _, _ := unstructured.NestedStringSlice(deny.Object, "spec", "policyTypes")
+	hasIngress, hasEgress := false, false
+	for _, tp := range types {
+		if tp == "Ingress" {
+			hasIngress = true
+		}
+		if tp == "Egress" {
+			hasEgress = true
+		}
+	}
+	if !hasIngress || !hasEgress {
+		t.Fatalf("default-deny must cover Ingress AND Egress, got %v", types)
 	}
 
 	// Cluster not ready yet → branch must not be marked ready.

@@ -408,36 +408,29 @@ func (s *Store) CreateProject(ctx context.Context, p store.CreateProjectParams) 
 	}
 	base := slug.Make(p.Name)
 
-	// First attempt with the plain slug. A unique violation aborts the whole
-	// transaction, so the suffix retry needs a fresh one.
-	err := s.withOrgTx(ctx, p.OrgID, func(tx pgx.Tx) error {
-		if err := requireOrg(ctx, tx, p.OrgID); err != nil {
-			return err
-		}
-		return insert(tx, base)
-	})
-	if err != nil && isUnique(err) {
-		// Collision: pick the next free suffix by counting existing slugs.
-		// A concurrent create can still race this to a second violation, which
-		// surfaces as 409 for the caller to retry — acceptable for a
-		// same-name-same-instant edge case.
+	// Gap-filling suffix loop, matching the memory store's semantics (audit
+	// finding: the two stores diverged, so unit tests on memory passed while
+	// postgres 409'd or chose a different slug). Each attempt is its own
+	// transaction because a unique violation aborts the whole tx. The bound
+	// (32) is far above any realistic same-name collision; only a genuine
+	// concurrent race to the same suffix surfaces as 409.
+	var err error
+	for attempt := 0; attempt < 32; attempt++ {
 		err = s.withOrgTx(ctx, p.OrgID, func(tx pgx.Tx) error {
-			var n int
-			if err := tx.QueryRow(ctx,
-				`SELECT count(*) FROM projects WHERE org_id = $1 AND slug LIKE $2 || '%' AND state <> 'deleting'`,
-				p.OrgID, base).Scan(&n); err != nil {
+			if err := requireOrg(ctx, tx, p.OrgID); err != nil {
 				return err
 			}
-			return insert(tx, slug.WithSuffix(base, n))
+			return insert(tx, slug.WithSuffix(base, attempt))
 		})
-	}
-	if err != nil {
-		if isUnique(err) {
-			return nil, store.ErrConflict
+		if err == nil {
+			return &pr, nil
 		}
-		return nil, err
+		if !isUnique(err) {
+			return nil, err
+		}
+		// This suffix is taken; try the next.
 	}
-	return &pr, nil
+	return nil, store.ErrConflict
 }
 
 const projectCols = `id, org_id, name, slug, region, pg_version, state, default_branch_id, created_at`

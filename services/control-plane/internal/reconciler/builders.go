@@ -103,44 +103,115 @@ func BuildResourceQuota(w postgres.BranchWork) *unstructured.Unstructured {
 	}}
 }
 
-// BuildNetworkPolicies returns the namespace's default-deny ingress policy
-// plus the single allow: gateway pods → Postgres/pooler port (MULTI_TENANCY §2).
+// Namespaces the tenant network policies must reach. Overridable via the
+// reconciler config later; constants keep the builder pure and testable.
+const (
+	OperatorNamespace   = "cnpg-system"
+	MonitoringNamespace = "nimbusdb-monitoring"
+	pgPort              = int64(5432)
+	instanceMgrPort     = int64(8000) // CNPG instance-manager REST
+	exporterPort        = int64(9187) // postgres_exporter metrics
+)
+
+func np(name, ns string, spec map[string]any) *unstructured.Unstructured {
+	return &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "networking.k8s.io/v1",
+		"kind":       "NetworkPolicy",
+		"metadata": map[string]any{
+			"name": name, "namespace": ns,
+			"labels": map[string]any{labelManagedBy: managerName},
+		},
+		"spec": spec,
+	}}
+}
+
+func nsSelector(name string) map[string]any {
+	return map[string]any{"namespaceSelector": map[string]any{
+		"matchLabels": map[string]any{"kubernetes.io/metadata.name": name},
+	}}
+}
+
+func tcp(ports ...int64) []any {
+	out := make([]any, len(ports))
+	for i, p := range ports {
+		out[i] = map[string]any{"protocol": "TCP", "port": p}
+	}
+	return out
+}
+
+// BuildNetworkPolicies isolates a project namespace while leaving the paths
+// CNPG needs to run a healthy HA cluster open (MULTI_TENANCY §2). The original
+// ingress-only default-deny + gateway allow was too tight (audit finding): it
+// blocked intra-cluster streaming replication, the CNPG operator, and metrics
+// scraping, and left egress wide open. This emits:
+//   - default-deny for BOTH ingress and egress (podSelector {})
+//   - ingress allows: gateway (5432), same-namespace replication (5432),
+//     CNPG operator (5432 + instance-manager 8000), monitoring (exporter 9187)
+//   - egress allows: DNS, same-namespace replication, CNPG operator, and 443
+//     for WAL archive to object storage — everything else denied.
 func BuildNetworkPolicies(w postgres.BranchWork) []*unstructured.Unstructured {
 	ns := NamespaceName(w.ProjectID)
-	deny := &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion": "networking.k8s.io/v1",
-		"kind":       "NetworkPolicy",
-		"metadata": map[string]any{
-			"name": "default-deny-ingress", "namespace": ns,
-			"labels": map[string]any{labelManagedBy: managerName},
+	sameNS := map[string]any{"podSelector": map[string]any{}}
+
+	deny := np("default-deny", ns, map[string]any{
+		"podSelector": map[string]any{},
+		"policyTypes": []any{"Ingress", "Egress"},
+	})
+
+	allowIngress := np("allow-postgres-ingress", ns, map[string]any{
+		"podSelector": map[string]any{},
+		"policyTypes": []any{"Ingress"},
+		"ingress": []any{
+			// Client traffic from the gateway.
+			map[string]any{
+				"from":  []any{nsSelector(GatewayNamespaceLabel())},
+				"ports": tcp(pgPort),
+			},
+			// Streaming replication between this cluster's own pods.
+			map[string]any{
+				"from":  []any{sameNS},
+				"ports": tcp(pgPort),
+			},
+			// CNPG operator: SQL + instance-manager REST.
+			map[string]any{
+				"from":  []any{nsSelector(OperatorNamespace)},
+				"ports": tcp(pgPort, instanceMgrPort),
+			},
+			// Metrics scraping.
+			map[string]any{
+				"from":  []any{nsSelector(MonitoringNamespace)},
+				"ports": tcp(exporterPort),
+			},
 		},
-		"spec": map[string]any{
-			"podSelector": map[string]any{},
-			"policyTypes": []any{"Ingress"},
+	})
+
+	allowEgress := np("allow-postgres-egress", ns, map[string]any{
+		"podSelector": map[string]any{},
+		"policyTypes": []any{"Egress"},
+		"egress": []any{
+			// DNS.
+			map[string]any{
+				"to": []any{nsSelector("kube-system")},
+				"ports": []any{
+					map[string]any{"protocol": "UDP", "port": int64(53)},
+					map[string]any{"protocol": "TCP", "port": int64(53)},
+				},
+			},
+			// Replication to same-namespace pods.
+			map[string]any{"to": []any{sameNS}, "ports": tcp(pgPort)},
+			// CNPG operator instance-manager.
+			map[string]any{"to": []any{nsSelector(OperatorNamespace)}, "ports": tcp(instanceMgrPort)},
+			// WAL archive / base backups to S3-compatible object storage.
+			map[string]any{"ports": tcp(443)},
 		},
-	}}
-	allowGateway := &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion": "networking.k8s.io/v1",
-		"kind":       "NetworkPolicy",
-		"metadata": map[string]any{
-			"name": "allow-gateway", "namespace": ns,
-			"labels": map[string]any{labelManagedBy: managerName},
-		},
-		"spec": map[string]any{
-			"podSelector": map[string]any{},
-			"policyTypes": []any{"Ingress"},
-			"ingress": []any{map[string]any{
-				"from": []any{map[string]any{
-					"namespaceSelector": map[string]any{
-						"matchLabels": map[string]any{"nimbusdb.io/component": "gateway"},
-					},
-				}},
-				"ports": []any{map[string]any{"protocol": "TCP", "port": int64(5432)}},
-			}},
-		},
-	}}
-	return []*unstructured.Unstructured{deny, allowGateway}
+	})
+
+	return []*unstructured.Unstructured{deny, allowIngress, allowEgress}
 }
+
+// GatewayNamespaceLabel is the metadata.name label of the gateway namespace,
+// matched by the ingress allow.
+func GatewayNamespaceLabel() string { return GatewayNamespace }
 
 // BuildCluster renders the CNPG Cluster for a branch. Sizing: guaranteed QoS
 // at min CU in v1 (requests == limits; vertical autoscaling is Phase 4).
@@ -225,8 +296,9 @@ func BuildRoutesJSON(eps []postgres.RoutableEndpoint) ([]byte, error) {
 	table := map[string]routeEntry{}
 	for _, e := range eps {
 		table[e.EndpointID] = routeEntry{
-			Backend: BackendFor(e.Kind, e.BranchID, e.ProjectID),
-			State:   string(e.State),
+			Backend:  BackendFor(e.Kind, e.BranchID, e.ProjectID),
+			State:    string(e.State),
+			MaxConns: e.MaxConns,
 		}
 	}
 	return json.MarshalIndent(map[string]any{"endpoints": table}, "", "  ")

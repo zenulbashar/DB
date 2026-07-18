@@ -28,16 +28,15 @@ type Result struct {
 func (r *Result) OK() bool { return len(r.Mismatches) == 0 }
 
 type Options struct {
-	// SampleRows caps the per-table checksum sample (0 = default 1000).
-	// Sampling is deterministic (ordered by row hash) so both sides pick the
-	// same rows regardless of physical order.
+	// SampleRows caps the per-table checksum sample. The DEFAULT (0) checksums
+	// the FULL table — a bounded sample can miss a single-row content diff in
+	// any table larger than the cap, which would let corruption through the
+	// cutover gate undetected (audit finding). A positive value is an explicit,
+	// caller-acknowledged downgrade for very large tables.
 	SampleRows int
 }
 
 func Run(ctx context.Context, source, target *pgx.Conn, o Options) (*Result, error) {
-	if o.SampleRows <= 0 {
-		o.SampleRows = 1000
-	}
 	res := &Result{}
 
 	srcTables, err := listTables(ctx, source)
@@ -147,16 +146,19 @@ func listTables(ctx context.Context, conn *pgx.Conn) ([]string, error) {
 	return out, rows.Err()
 }
 
-// sampledChecksum hashes a deterministic sample of the table: each row is
-// rendered to text and hashed, the sample is the first N hashes in hash
-// order, and the aggregate digests those. Identical on both sides for
-// identical content, independent of physical row order.
+// sampledChecksum hashes each row to text, orders the hashes, and digests the
+// aggregate — identical on both sides for identical content, independent of
+// physical row order. With sample <= 0 (the default) it hashes EVERY row, so a
+// single differing row is always caught; a positive sample bounds it to the N
+// smallest hashes (an explicit downgrade — see Options.SampleRows).
 func sampledChecksum(ctx context.Context, conn *pgx.Conn, table string, sample int) (string, error) {
+	inner := fmt.Sprintf(`SELECT md5(t::text) AS h FROM %s t`, table)
+	if sample > 0 {
+		inner = fmt.Sprintf(`SELECT md5(t::text) AS h FROM %s t ORDER BY md5(t::text) LIMIT %d`, table, sample)
+	}
 	var sum *string
-	err := conn.QueryRow(ctx, fmt.Sprintf(`
-		SELECT md5(string_agg(h, '' ORDER BY h))
-		  FROM (SELECT md5(t::text) AS h FROM %s t ORDER BY md5(t::text) LIMIT %d) s`,
-		table, sample)).Scan(&sum)
+	err := conn.QueryRow(ctx,
+		`SELECT md5(string_agg(h, '' ORDER BY h)) FROM (`+inner+`) s`).Scan(&sum)
 	if err != nil {
 		return "", err
 	}

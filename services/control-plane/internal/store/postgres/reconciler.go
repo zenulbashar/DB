@@ -81,14 +81,37 @@ func (s *Store) MarkBranchReady(ctx context.Context, branchID string) error {
 // FinishBranchTeardown removes a deleting branch's rows after its Kubernetes
 // resources are gone. Rows are hard-deleted (audit_log keeps history; backup
 // retention is object-storage lifecycle, not row retention).
+//
+// db_roles/databases/endpoints cascade on the branch delete, but the secrets
+// those roles reference do NOT (the FK points db_roles -> secrets), so they
+// would orphan. Delete them explicitly first (audit finding). The parent_id
+// and imports.target_branch_id references are handled by 0005's ON DELETE SET
+// NULL, so the branch delete no longer needs those cleared by hand.
 func (s *Store) FinishBranchTeardown(ctx context.Context, branchID string) error {
 	return s.withPrivTx(ctx, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx,
 			`UPDATE projects SET default_branch_id = NULL WHERE default_branch_id = $1`, branchID); err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx, `DELETE FROM branches WHERE id = $1 AND state = 'deleting'`, branchID)
-		return err
+		// Capture the roles' secret ids BEFORE deleting the branch — db_roles
+		// cascade-delete with the branch (db_roles.secret_id -> secrets, so we
+		// cannot delete the secrets while the roles still reference them, and
+		// once the roles are gone the ids are lost).
+		var secretIDs []string
+		if err := tx.QueryRow(ctx,
+			`SELECT COALESCE(array_agg(secret_id), '{}') FROM db_roles WHERE branch_id = $1`,
+			branchID).Scan(&secretIDs); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM branches WHERE id = $1 AND state = 'deleting'`, branchID); err != nil {
+			return err
+		}
+		if len(secretIDs) > 0 {
+			if _, err := tx.Exec(ctx, `DELETE FROM secrets WHERE id = ANY($1)`, secretIDs); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 }
 
@@ -110,16 +133,19 @@ type RoutableEndpoint struct {
 	ProjectID  string
 	Kind       domain.EndpointKind
 	State      domain.ResourceState // ready or suspended reach the table
+	MaxConns   int                  // per-endpoint connection cap (0 = unlimited)
 }
 
 // ListRoutableEndpoints returns endpoints whose branches are live enough to
 // route (ready or suspended — suspended entries let the gateway answer with
-// a clear error today and wake-on-connect in Phase 4).
+// a clear error today and wake-on-connect in Phase 4). MaxConns is derived
+// from the branch's compute ceiling so the gateway's per-endpoint cap is
+// actually populated (audit finding: it was always 0/unlimited).
 func (s *Store) ListRoutableEndpoints(ctx context.Context) ([]RoutableEndpoint, error) {
 	var out []RoutableEndpoint
 	err := s.withPrivTx(ctx, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
-			SELECT e.id, e.branch_id, b.project_id, e.kind, e.state
+			SELECT e.id, e.branch_id, b.project_id, e.kind, e.state, b.compute_max_cu
 			  FROM endpoints e JOIN branches b ON b.id = e.branch_id
 			 WHERE e.state IN ('ready','suspended') AND b.state IN ('ready','suspended')
 			 ORDER BY e.id`)
@@ -129,12 +155,30 @@ func (s *Store) ListRoutableEndpoints(ctx context.Context) ([]RoutableEndpoint, 
 		defer rows.Close()
 		for rows.Next() {
 			var r RoutableEndpoint
-			if err := rows.Scan(&r.EndpointID, &r.BranchID, &r.ProjectID, &r.Kind, &r.State); err != nil {
+			var maxCU float64
+			if err := rows.Scan(&r.EndpointID, &r.BranchID, &r.ProjectID, &r.Kind, &r.State, &maxCU); err != nil {
 				return err
 			}
+			r.MaxConns = MaxConnsForEndpoint(r.Kind, maxCU)
 			out = append(out, r)
 		}
 		return rows.Err()
 	})
 	return out, err
+}
+
+// MaxConnsForEndpoint sizes the gateway connection cap from the branch compute
+// ceiling. Postgres max_connections scales roughly with CUs; the pooled
+// endpoint multiplexes so it gets the larger cap. These bound the shared L4
+// tier (MULTI_TENANCY §3) without starving a legitimately busy tenant.
+func MaxConnsForEndpoint(kind domain.EndpointKind, maxCU float64) int {
+	perCU := 50
+	base := int(maxCU * float64(perCU))
+	if base < 25 {
+		base = 25
+	}
+	if kind == domain.EndpointRWPooled || kind == domain.EndpointROPooled {
+		return base * 4 // pooled clients are many-but-short
+	}
+	return base
 }

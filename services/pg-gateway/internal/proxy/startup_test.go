@@ -3,6 +3,7 @@ package proxy
 import (
 	"bytes"
 	"encoding/binary"
+	"strings"
 	"testing"
 )
 
@@ -121,6 +122,19 @@ func TestStripEndpointOption(t *testing.T) {
 	stripped, _ = ReadInitial(bytes.NewReader(StripEndpointOption(init)))
 	if _, ok := stripped.Params["options"]; ok {
 		t.Fatalf("empty options must be dropped, got %q", stripped.Params["options"])
+	}
+
+	// The space-separated "-c endpoint=X" form must drop BOTH tokens — a
+	// dangling "-c" makes the backend reject the startup (audit finding).
+	raw = packet(protocolV3, "user", "app", "options", "-c statement_timeout=5000 -c endpoint=ep_x")
+	init, _ = ReadInitial(bytes.NewReader(raw))
+	stripped, _ = ReadInitial(bytes.NewReader(StripEndpointOption(init)))
+	got := stripped.Params["options"]
+	if got != "-c statement_timeout=5000" {
+		t.Fatalf("options = %q, want the endpoint pair removed with no dangling -c", got)
+	}
+	if strings.Contains(got, "endpoint") {
+		t.Fatalf("endpoint token survived: %q", got)
 	}
 }
 

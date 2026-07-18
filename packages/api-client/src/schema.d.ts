@@ -539,7 +539,7 @@ export interface components {
         /** @enum {string} */
         OrgRole: "owner" | "admin" | "member" | "viewer";
         /** @enum {string} */
-        Scope: "orgs:read" | "projects:read" | "projects:write" | "projects:provision" | "branches:read" | "branches:write" | "endpoints:read" | "roles:read" | "roles:write" | "backups:read" | "backups:write" | "restores:write" | "imports:read" | "imports:write" | "metrics:read" | "audit:read" | "keys:manage" | "webhooks:manage" | "usage:read";
+        Scope: "orgs:read" | "orgs:write" | "members:manage" | "projects:read" | "projects:write" | "projects:provision" | "branches:read" | "branches:write" | "endpoints:read" | "roles:read" | "roles:write" | "backups:read" | "backups:write" | "restores:write" | "imports:read" | "imports:write" | "metrics:read" | "audit:read" | "keys:manage" | "webhooks:manage" | "usage:read";
         Org: {
             id: string;
             name: string;
@@ -1154,8 +1154,11 @@ export interface operations {
                 "application/json": {
                     org_id: string;
                     name: string;
-                    /** @default syd1 */
-                    region?: string;
+                    /**
+                     * @default syd1
+                     * @enum {string}
+                     */
+                    region?: "syd1";
                     /**
                      * @default 17
                      * @enum {integer}

@@ -208,11 +208,13 @@ func (r *Runner) runVerify(ctx context.Context, job *Job) error {
 	defer source.Close(ctx)
 	defer target.Close(ctx)
 
+	// For logical mode, sync sequences (verify checks target >= source) but do
+	// NOT tear the replication link down yet. Verify parity FIRST, while the
+	// source is still frozen and the link intact, so a failed verify is
+	// recoverable and can distinguish incomplete sync from corruption (audit
+	// finding). Only cut over once parity holds.
 	if job.Mode == "logical_replication" {
 		if _, err := logicalrepl.SyncSequences(ctx, source, target, 0); err != nil {
-			return err
-		}
-		if err := logicalrepl.Cutover(ctx, source, target, r.syncFor(job)); err != nil {
 			return err
 		}
 	}
@@ -225,6 +227,13 @@ func (r *Runner) runVerify(ctx context.Context, job *Job) error {
 		return fmt.Errorf("verification found %d mismatch(es), first: %s/%s",
 			len(v.Mismatches), v.Mismatches[0].Kind, v.Mismatches[0].Object)
 	}
+
+	if job.Mode == "logical_replication" {
+		if err := logicalrepl.Cutover(ctx, source, target, r.syncFor(job)); err != nil {
+			return err
+		}
+	}
+
 	return r.cp.Transition(ctx, job.ID, "verified", nil, map[string]any{
 		"tables_checked": v.TablesChecked, "rows": v.RowsTarget, "checksum_ok": true,
 	}, nil)

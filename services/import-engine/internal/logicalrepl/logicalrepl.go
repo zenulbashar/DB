@@ -180,8 +180,11 @@ func SyncSequences(ctx context.Context, source, target *pgx.Conn, margin int64) 
 		if s.val == 0 {
 			continue // never advanced; setval(0) would be invalid
 		}
-		if _, err := target.Exec(ctx,
-			fmt.Sprintf(`SELECT setval('%s', $1)`, s.name), s.val+margin); err != nil {
+		// Pass the sequence name as a regclass-cast parameter rather than
+		// interpolating it into the statement — the name comes from the
+		// source's catalog, so a hostile source could otherwise smuggle SQL
+		// through a crafted sequence identifier (audit finding).
+		if _, err := target.Exec(ctx, `SELECT setval($1::regclass, $2)`, s.name, s.val+margin); err != nil {
 			return 0, fmt.Errorf("setval %s: %w", s.name, err)
 		}
 	}
@@ -189,15 +192,39 @@ func SyncSequences(ctx context.Context, source, target *pgx.Conn, margin int64) 
 }
 
 // Cutover tears the replication link down after the freeze-verify-flip
-// sequence. DROP SUBSCRIPTION removes the remote slot when it can reach the
-// source; the explicit slot drop afterwards covers unreachable-source aborts
-// (a leaked slot retains WAL forever — the RDS storage-growth failure mode).
+// sequence. Ordering is load-bearing (audit finding): a plain
+// DROP SUBSCRIPTION tries to drop the remote slot over the source connection,
+// so if the source is unreachable it errors and RETURNS BEFORE the explicit
+// slot drop — leaking a slot that retains WAL on the source forever (the RDS
+// storage-growth failure mode). Instead we DETACH the slot from the
+// subscription first (DISABLE + slot_name = NONE), so DROP SUBSCRIPTION is
+// purely local and always succeeds, then drop the now-unowned slot on the
+// source ourselves.
 func Cutover(ctx context.Context, source, target *pgx.Conn, s Sync) error {
-	if _, err := target.Exec(ctx, `DROP SUBSCRIPTION IF EXISTS `+s.Name); err != nil {
-		return fmt.Errorf("drop subscription: %w", err)
+	if err := s.validate(); err != nil {
+		return err
 	}
-	if _, err := source.Exec(ctx, `SELECT pg_drop_replication_slot(slot_name)
-		FROM pg_replication_slots WHERE slot_name = '`+s.Name+`'`); err != nil {
+	var exists bool
+	if err := target.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM pg_subscription WHERE subname = $1)`, s.Name).Scan(&exists); err != nil {
+		return fmt.Errorf("check subscription: %w", err)
+	}
+	if exists {
+		if _, err := target.Exec(ctx, `ALTER SUBSCRIPTION `+s.Name+` DISABLE`); err != nil {
+			return fmt.Errorf("disable subscription: %w", err)
+		}
+		if _, err := target.Exec(ctx, `ALTER SUBSCRIPTION `+s.Name+` SET (slot_name = NONE)`); err != nil {
+			return fmt.Errorf("detach slot: %w", err)
+		}
+		if _, err := target.Exec(ctx, `DROP SUBSCRIPTION `+s.Name); err != nil {
+			return fmt.Errorf("drop subscription: %w", err)
+		}
+	}
+	// The slot is now unowned; dropping it here is the only thing that frees
+	// the WAL it was retaining.
+	if _, err := source.Exec(ctx,
+		`SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots WHERE slot_name = $1`,
+		s.Name); err != nil {
 		return fmt.Errorf("drop replication slot: %w", err)
 	}
 	if _, err := source.Exec(ctx, `DROP PUBLICATION IF EXISTS `+s.Name); err != nil {
