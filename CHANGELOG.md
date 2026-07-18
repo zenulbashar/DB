@@ -16,6 +16,21 @@ All notable changes to this repository. Format loosely follows [Keep a Changelog
 - Integration tests against real Postgres fixtures (enum + PK-less + serial tables);
   live CLI smoke verified against the local instance. CI job + Makefile added.
 
+### Added (import runner, 2026-07-18)
+- `internal/runner`: transport-agnostic orchestration binding the import engine to the
+  control-plane state machine. A `ControlPlane` interface (claim job → drive stage →
+  transition) is implemented by an HTTP client in production and a fake in tests; the
+  runner owns *how* each stage executes, the control plane owns *what state is legal next*
+  (so a stale runner view cannot corrupt a job). One `Step` advances exactly one state;
+  any stage error marks the job `failed` so a poisoned job never wedges the queue.
+- Stage handlers per state for both modes: preflight (blocker→fail), dump/restore or
+  schema-only+subscribe, initial-copy wait, lag-gated live-sync, sequence-sync+cutover,
+  and parity-verified completion.
+- Integration test drives a full **dump_restore import to `verified`** through the real
+  transition rules and two real databases (400-row enum table lands intact), plus a
+  failure-path test proving unreachable sources fail the job with a recorded message.
+  This is the closest local proxy to the production Roster cutover.
+
 ### Added (imports resource + state machine, 2026-07-18)
 - Migration `0004`: `imports` table under FORCE-RLS; source connection URLs stored ONLY
   as envelope-encrypted secrets (never returned by any read path — leak-tested).
