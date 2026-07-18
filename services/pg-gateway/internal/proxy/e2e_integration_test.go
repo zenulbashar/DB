@@ -216,3 +216,88 @@ func TestGatewayRejectsPlaintext(t *testing.T) {
 		t.Fatalf("want 'SSL required' rejection, got: %v", err)
 	}
 }
+
+// flipWaker simulates the control-plane + reconciler resuming a branch: the
+// wake trigger schedules the route to flip to ready shortly after, exactly as
+// the real reconciler republishes the route table once the cluster is up.
+type flipWaker struct {
+	table      *fakeTable
+	endpointID string
+	ready      routes.Route
+	delay      time.Duration
+}
+
+func (f *flipWaker) Wake(_ context.Context, _ string) error {
+	go func() {
+		time.Sleep(f.delay)
+		f.table.set(f.endpointID, f.ready)
+	}()
+	return nil
+}
+
+// A real pgx client connecting to a SUSPENDED endpoint is held, the branch is
+// woken, and once the route flips to ready the connection completes against the
+// live backend — the full wake-on-connect path (ADR-014).
+func TestGatewayWakesSuspendedEndpoint(t *testing.T) {
+	adminURL := os.Getenv("TEST_DATABASE_URL")
+	if adminURL == "" {
+		t.Skip("TEST_DATABASE_URL not set; skipping gateway wake e2e")
+	}
+	u, err := url.Parse(adminURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend := u.Host
+	if !strings.Contains(backend, ":") {
+		backend += ":5432"
+	}
+
+	const wakeEP = "ep_wake"
+	ft := &fakeTable{m: map[string]routes.Route{
+		wakeEP: {Backend: backend, State: routes.StateSuspended, BranchID: "br_wake"},
+	}}
+	fw := &flipWaker{
+		table: ft, endpointID: wakeEP, delay: 80 * time.Millisecond,
+		ready: routes.Route{Backend: backend, State: routes.StateReady, BranchID: "br_wake"},
+	}
+
+	m := NewMetrics(prometheus.NewRegistry())
+	srv := New(Config{
+		TLS:         &tls.Config{Certificates: []tls.Certificate{selfSignedWildcard(t)}, MinVersion: tls.VersionTLS12},
+		Waker:       fw,
+		WakeTimeout: 10 * time.Second,
+		WakePoll:    25 * time.Millisecond,
+	}, ft, m, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go srv.Serve(ctx, ln)
+
+	cfg, err := pgx.ParseConfig(adminURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, port, _ := net.SplitHostPort(ln.Addr().String())
+	cfg.Host = host
+	cfg.Port = mustPort(t, port)
+	cfg.TLSConfig = &tls.Config{ServerName: "ep-wake.syd1.db.nimbus.app", InsecureSkipVerify: true}
+	cfg.Fallbacks = nil
+
+	conn, err := pgx.ConnectConfig(ctx, cfg)
+	if err != nil {
+		t.Fatalf("connect through waking gateway: %v", err)
+	}
+	defer conn.Close(ctx)
+	var one int
+	if err := conn.QueryRow(ctx, "SELECT 1").Scan(&one); err != nil || one != 1 {
+		t.Fatalf("SELECT 1 after wake: %v (%d)", err, one)
+	}
+	// The endpoint is now ready in the table.
+	if r, _ := ft.Lookup(wakeEP); r.State != routes.StateReady {
+		t.Fatalf("endpoint state after wake = %s, want ready", r.State)
+	}
+}

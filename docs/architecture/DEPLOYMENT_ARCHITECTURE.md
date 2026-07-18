@@ -77,7 +77,9 @@ PR → GitHub Actions (lint, typecheck, unit+integration tests, SAST, image buil
 - **Logs:** Loki; **Traces:** OTel → Tempo (sampled). All services emit OTel from Phase 1.
 - **Alerting:** Alertmanager → on-call (Phase 5+: paging); SLOs with error budgets:
   - API availability 99.9 %, gateway connect success 99.95 %,
-  - wake p95 < 25 s (Gen 1), provisioning median < 60 s / p95 < 90 s,
+  - wake p95 < 25 s (Gen 1) — measured directly by the gateway's `pggw_wake_wait_seconds`
+    histogram, with `pggw_wakes_total{result}` and `pggw_wake_holds_active` for hold health,
+  - provisioning median < 60 s / p95 < 90 s,
   - backup-verification job success = 100 % (any failure pages).
 - **Runbooks** in `/docs/runbooks/`, one per alert, created with the alert (phase-gate item).
 - **Status page** (Phase 7) fed by the same SLO probes.
