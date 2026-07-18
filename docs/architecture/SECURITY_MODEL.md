@@ -47,6 +47,10 @@
 
 - Org-scoped RBAC (roles in MULTI_TENANCY §4) enforced in the API layer; repository layer
   injects `org_id`; Postgres RLS as second net on the control-plane DB.
+- **The control-plane DB role must be `NOSUPERUSER NOBYPASSRLS`** — superusers silently bypass
+  RLS, deleting the second net. Enforced at startup: the API refuses to boot if its role would
+  bypass RLS (found by the Phase 1 integration suite; local dev/tests provision a dedicated
+  non-superuser role, and CNPG's default app users satisfy this in production).
 - Tenant Postgres: tenants own their roles inside their branch only; role creation flows through
   the API so grants stay auditable; no `SUPERUSER`, `pg_execute_server_program`,
   `pg_read/write_server_files` ever granted.
@@ -56,7 +60,8 @@
 
 | Class | Handling |
 |---|---|
-| Tenant DB passwords, webhook secrets, Nimbus integration tokens | **Envelope encryption**: AES-256-GCM data keys per secret, wrapped by a root KEK in cloud KMS (or HSM-backed equivalent; self-hosted fallback: age key in an isolated KMS service). Ciphertext in `secrets` table with `key_version` for rotation. Plaintext exists only in request-scoped memory. |
+| Tenant DB passwords, webhook secrets, Nimbus integration tokens, import source URLs | **Envelope encryption**: AES-256-GCM data keys per secret, wrapped by a root KEK in cloud KMS (or HSM-backed equivalent; self-hosted fallback: age key in an isolated KMS service). Ciphertext in `secrets` table with `key_version` for rotation. Plaintext exists only in request-scoped memory. |
+| Idempotency response cache | Create responses carry one-time secrets (API tokens, DB passwords). The cached body in `idempotency_keys` is envelope-encrypted with the same keyring so no plaintext credential persists at rest; the caller still receives plaintext on the live call and on replay. (Same-key requests are also serialized per instance so two racing POSTs cannot both create resources.) |
 | Platform component secrets (control-plane DB creds, NATS creds) | Kubernetes Secrets sourced via External Secrets Operator from the KMS-backed store; **SOPS(age)-encrypted** in git where GitOps requires them. Never plaintext in git. |
 | TLS | cert-manager: public certs via ACME (Let's Encrypt) for `*.{region}.db.nimbus.app` (wildcard, DNS-01); internal mTLS via private CA. Postgres endpoints TLS-required (`sslmode=require` minimum; `verify-full` documented and supported). |
 | At rest | Storage-class encryption for PVCs; SSE for object storage; control-plane DB on encrypted volumes. Backups additionally client-side encrypted (Barman Cloud AES) from Phase 2. |
@@ -68,9 +73,11 @@ cert-manager-automated; API keys support expiry.
 
 ## 6. Audit & logging
 
-- `audit_log` (control plane): append-only (no UPDATE/DELETE grants; retention ≥ 1 year),
-  covering all mutations, credential reveals, SQL-editor executions, admin-portal actions,
-  break-glass events. Tenant-visible via `GET /orgs/{org}/audit-log`.
+- `audit_log` (control plane): append-only (no UPDATE/DELETE RLS policies exist, so rows are
+  immutable even to the app role; retention ≥ 1 year), covering all mutations, credential
+  reveals, SQL-editor executions, admin-portal actions, break-glass events. Tenant-visible via
+  `GET /orgs/{org}/audit-log`. Phase 1 writes audit entries post-commit (best-effort, logged on
+  failure); Phase 2 moves them into the mutation transaction.
 - Platform logs (Loki): structured, tenant-data-free by policy + scrubbing middleware; 30–90 day
   retention by stream.
 - Postgres logs for tenant branches: available to the owning tenant (console log viewer,

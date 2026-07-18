@@ -32,9 +32,11 @@
 | API key | `Authorization: Bearer ndb_<64hex>` | Programmatic; org-scoped; explicit scopes. Stored hashed (SHA-256); shown once at creation. |
 | Service integration key | same format, restricted scope set | Nimbus ↔ NimbusDB integration. |
 
-Scopes (least privilege): `orgs:read`, `projects:read|write|provision`, `branches:read|write`,
-`endpoints:read`, `roles:read|write`, `backups:read|write`, `restores:write`, `imports:read|write`,
-`metrics:read`, `audit:read`, `keys:manage`, `webhooks:manage`, `usage:read`.
+Scopes (least privilege): `orgs:read|write`, `members:manage`, `projects:read|write|provision`,
+`branches:read|write`, `endpoints:read`, `roles:read|write`, `backups:read|write`, `restores:write`,
+`imports:read|write`, `metrics:read`, `audit:read`, `keys:manage`, `webhooks:manage`, `usage:read`.
+(`orgs:write` and `members:manage` were added during Phase 1 implementation — org mutation and
+membership management need scopes distinct from read access.)
 
 ## 3. Resource map
 

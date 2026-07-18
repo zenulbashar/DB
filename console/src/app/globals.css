@@ -1,0 +1,65 @@
+@import "tailwindcss";
+
+/*
+ * NimbusDB console token layer — DESIGN_SYSTEM_MAPPING.md §2.
+ * Interim palette derived from the Nimbus hosting platform design language
+ * (dark-first, forest chrome, accent blue). Token-isolated by construction:
+ * when the dedicated console design export lands (§5), values change HERE and
+ * in the primitives only.
+ */
+@theme {
+  /* Surfaces */
+  --color-background: #0a0a0a;
+  --color-surface: #141414;
+  --color-surface-raised: #1c1c1c;
+  --color-edge: #262626;
+  --color-edge-strong: #3a3a3a;
+
+  /* Text */
+  --color-fg: #ededed;
+  --color-fg-muted: #9b9b9b;
+  --color-fg-faint: #6e6e6e;
+
+  /* Brand & actions */
+  --color-accent: #0070f3;
+  --color-accent-hover: #339dff;
+  --color-forest: #13301f;
+  --color-forest-edge: #1e4a30;
+
+  /* Status system — resource lifecycle states share these across badges,
+     dots, and charts (provisioning/ready/suspended/error/deleting). */
+  --color-success: #2ea043;
+  --color-warning: #d29922;
+  --color-danger: #f85149;
+  --color-state-provisioning: var(--color-accent);
+  --color-state-ready: var(--color-success);
+  --color-state-suspended: var(--color-fg-muted);
+  --color-state-error: var(--color-danger);
+  --color-state-deleting: var(--color-warning);
+
+  /* Type */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
+
+  /* Radii — Nimbus feel */
+  --radius-control: 6px;
+  --radius-card: 10px;
+  --radius-pill: 999px;
+
+  /* Density scale for data tables (consoles are denser than page chrome) */
+  --spacing-row-compact: 0.375rem;
+  --spacing-row-regular: 0.625rem;
+}
+
+body {
+  background: var(--color-background);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Focus visibility is non-negotiable (accessibility bar, §4). */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}

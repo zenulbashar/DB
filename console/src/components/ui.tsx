@@ -1,0 +1,115 @@
+/*
+ * Seed primitives for the console design system (DESIGN_SYSTEM_MAPPING.md §3).
+ * Variant-map pattern follows the Nimbus ui.tsx idiom; states (loading etc.)
+ * follow the design-handoff state catalogue. Grows with Phase 3.
+ */
+import type { ReactNode } from "react";
+
+const buttonVariants = {
+  primary:
+    "bg-accent text-white hover:bg-accent-hover disabled:bg-edge disabled:text-fg-faint",
+  secondary:
+    "border border-edge-strong bg-surface text-fg hover:border-fg-muted disabled:text-fg-faint",
+  ghost: "text-fg-muted hover:bg-surface-raised hover:text-fg",
+  danger: "bg-danger text-white hover:opacity-90 disabled:opacity-50",
+} as const;
+
+const buttonSizes = {
+  sm: "h-7 px-2.5 text-xs",
+  md: "h-9 px-4 text-sm",
+  lg: "h-11 px-5 text-sm",
+} as const;
+
+export function Button({
+  variant = "primary",
+  size = "md",
+  loading = false,
+  disabled,
+  children,
+  ...rest
+}: {
+  variant?: keyof typeof buttonVariants;
+  size?: keyof typeof buttonSizes;
+  loading?: boolean;
+  children: ReactNode;
+} & React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  return (
+    <button
+      className={`inline-flex items-center justify-center gap-2 rounded-control font-medium transition-colors ${buttonVariants[variant]} ${buttonSizes[size]}`}
+      disabled={disabled || loading}
+      {...rest}
+    >
+      {loading && <Spinner />}
+      {children}
+    </button>
+  );
+}
+
+export function Card({
+  title,
+  children,
+}: {
+  title?: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="rounded-card border border-edge bg-surface p-6">
+      {title && <h2 className="mb-3 text-sm font-semibold">{title}</h2>}
+      {children}
+    </section>
+  );
+}
+
+export type ResourceState =
+  | "provisioning"
+  | "ready"
+  | "suspended"
+  | "error"
+  | "deleting";
+
+const stateColors: Record<ResourceState, string> = {
+  provisioning: "bg-state-provisioning",
+  ready: "bg-state-ready",
+  suspended: "bg-state-suspended",
+  error: "bg-state-error",
+  deleting: "bg-state-deleting",
+};
+
+export function StatusDot({ state }: { state: ResourceState }) {
+  return (
+    <span
+      aria-label={state}
+      className={`inline-block size-2 rounded-pill ${stateColors[state]} ${
+        state === "provisioning" ? "animate-pulse" : ""
+      }`}
+    />
+  );
+}
+
+export function Badge({ children }: { children: ReactNode }) {
+  return (
+    <span className="rounded-pill border border-edge px-2 py-0.5 text-xs text-fg-muted">
+      {children}
+    </span>
+  );
+}
+
+export function Spinner() {
+  return (
+    <span
+      aria-hidden
+      className="size-3.5 animate-spin rounded-pill border-2 border-white/30 border-t-white"
+    />
+  );
+}
+
+export function ConnectionString({ value }: { value: string }) {
+  // Secret-bearing display: masked by default; the audited reveal flow
+  // arrives with the API wiring in Phase 3.
+  const masked = value.replace(/:\/\/([^:]+):[^@]+@/, "://$1:••••••••@");
+  return (
+    <code className="block overflow-x-auto rounded-control border border-edge bg-background px-3 py-2 font-mono text-xs text-fg-muted">
+      {masked}
+    </code>
+  );
+}
