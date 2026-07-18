@@ -145,7 +145,8 @@ func BuildNetworkPolicies(w postgres.BranchWork) []*unstructured.Unstructured {
 // BuildCluster renders the CNPG Cluster for a branch. Sizing: guaranteed QoS
 // at min CU in v1 (requests == limits; vertical autoscaling is Phase 4).
 // Instances by role: production 2 (streaming replica + failover), else 1.
-func BuildCluster(w postgres.BranchWork) *unstructured.Unstructured {
+// A non-nil backup config attaches continuous WAL archiving + retention.
+func BuildCluster(w postgres.BranchWork, backup *BackupConfig) *unstructured.Unstructured {
 	instances := 1
 	if w.Branch.Role == domain.BranchProduction {
 		instances = 2
@@ -156,6 +157,22 @@ func BuildCluster(w postgres.BranchWork) *unstructured.Unstructured {
 		"cpu":    fmt.Sprintf("%dm", cpuMilli),
 		"memory": fmt.Sprintf("%dMi", memMi),
 	}
+	spec := map[string]any{
+		"instances": int64(instances),
+		"imageName": fmt.Sprintf("ghcr.io/cloudnative-pg/postgresql:%d", w.PGVersion),
+		"storage":   map[string]any{"size": "5Gi"},
+		"resources": map[string]any{"requests": res, "limits": res},
+		"postgresql": map[string]any{
+			"parameters": map[string]any{
+				// pg_stat_statements from day one (query insights, Phase 7).
+				"shared_preload_libraries": "pg_stat_statements",
+			},
+		},
+		"enableSuperuserAccess": false,
+	}
+	if backup != nil {
+		spec["backup"] = backup.barmanSection(w)
+	}
 	return &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": ClusterGVK.GroupVersion().String(),
 		"kind":       ClusterGVK.Kind,
@@ -164,21 +181,7 @@ func BuildCluster(w postgres.BranchWork) *unstructured.Unstructured {
 			"namespace": NamespaceName(w.ProjectID),
 			"labels":    commonLabels(w),
 		},
-		"spec": map[string]any{
-			"instances": int64(instances),
-			"imageName": fmt.Sprintf("ghcr.io/cloudnative-pg/postgresql:%d", w.PGVersion),
-			"storage":   map[string]any{"size": "5Gi"},
-			"resources": map[string]any{"requests": res, "limits": res},
-			"postgresql": map[string]any{
-				"parameters": map[string]any{
-					// pg_stat_statements from day one (query insights, Phase 7).
-					"shared_preload_libraries": "pg_stat_statements",
-				},
-			},
-			"enableSuperuserAccess": false,
-			// WAL archiving (barman-cloud plugin) is wired in the backup
-			// slice of Phase 2; the reconciler owns the object shape.
-		},
+		"spec": spec,
 	}}
 }
 

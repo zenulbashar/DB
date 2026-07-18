@@ -20,6 +20,13 @@ import (
 	"github.com/zenulbashar/DB/services/control-plane/internal/store/postgres"
 )
 
+func getenvDefault(k, def string) string {
+	if v := os.Getenv(k); v != "" {
+		return v
+	}
+	return def
+}
+
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
@@ -56,7 +63,21 @@ func main() {
 		os.Exit(1)
 	}
 
-	engine := reconciler.New(st, kc, log)
+	var backup *reconciler.BackupConfig
+	if bucket := os.Getenv("NDB_BACKUP_BUCKET"); bucket != "" {
+		backup = &reconciler.BackupConfig{
+			BucketBase:        bucket,
+			EndpointURL:       os.Getenv("NDB_BACKUP_ENDPOINT_URL"),
+			CredentialsSecret: getenvDefault("NDB_BACKUP_CREDENTIALS_SECRET", "ndb-backup-credentials"),
+		}
+	} else if os.Getenv("NDB_ENV") != "dev" {
+		log.Error("NDB_BACKUP_BUCKET is required outside dev: tenant clusters must archive WAL (DATABASE_ARCHITECTURE §3, risk R-2)")
+		os.Exit(1)
+	} else {
+		log.Warn("running WITHOUT WAL archiving/backups (dev only)")
+	}
+
+	engine := reconciler.New(st, kc, backup, log)
 
 	go func() {
 		mux := http.NewServeMux()

@@ -47,7 +47,7 @@ func testWork(state domain.ResourceState, role domain.BranchRole) postgres.Branc
 	return postgres.BranchWork{
 		Branch: domain.Branch{
 			ID: "br_01test", ProjectID: "prj_01test", OrgID: "org_01test",
-			Name: "main", Role: role, State: state,
+			Name: "main", Role: role, State: state, RetentionDays: 7,
 			Compute: domain.Compute{MinCU: 0.25, MaxCU: 2, SuspendTimeoutS: 300},
 		},
 		ProjectID: "prj_01test", OrgID: "org_01test", Region: "syd1", PGVersion: 17,
@@ -61,7 +61,18 @@ func testWork(state domain.ResourceState, role domain.BranchRole) postgres.Branc
 func newEngine(t *testing.T, src Source, objs ...client.Object) (*Engine, client.Client) {
 	t.Helper()
 	kc := fake.NewClientBuilder().WithScheme(Scheme()).WithObjects(objs...).Build()
-	return New(src, kc, slog.New(slog.NewTextHandler(io.Discard, nil))), kc
+	return New(src, kc, nil, slog.New(slog.NewTextHandler(io.Discard, nil))), kc
+}
+
+func newEngineWithBackup(t *testing.T, src Source) (*Engine, client.Client, *BackupConfig) {
+	t.Helper()
+	cfg := &BackupConfig{
+		BucketBase:        "s3://ndb-syd1-wal",
+		EndpointURL:       "https://minio.platform.svc:9000",
+		CredentialsSecret: "ndb-backup-credentials",
+	}
+	kc := fake.NewClientBuilder().WithScheme(Scheme()).Build()
+	return New(src, kc, cfg, slog.New(slog.NewTextHandler(io.Discard, nil))), kc, cfg
 }
 
 func get(t *testing.T, kc client.Client, gvk string, ns, name string) *unstructured.Unstructured {
@@ -172,7 +183,7 @@ func TestTeardownRemovesResourcesAndNamespaceWhenLast(t *testing.T) {
 	if err := seedEngine.ReconcileOnce(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	e := New(src, kc, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	e := New(src, kc, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	if err := e.ReconcileOnce(context.Background()); err != nil {
 		t.Fatal(err)

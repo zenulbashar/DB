@@ -67,12 +67,27 @@ All notable changes to this repository. Format loosely follows [Keep a Changelog
 - Test harness hardened: schema-level reset + catalog-derived truncation (no more stale
   table lists as migrations land).
 
+### Added (2e: WAL archiving/backup + recovery specs, 2026-07-18)
+- `BackupConfig` on the reconciler (S3-compatible destination, per-project/branch
+  `destinationPath` isolation, credentials secret refs, gzip WAL/data compression);
+  Cluster spec gains `barmanObjectStore` + `retentionPolicy` from branch retention —
+  with a 7-day floor guard (a zero-valued record can never render "0d" retention).
+- `ScheduledBackup` per branch: nightly base backup with deterministic hash-spread
+  scheduling (01:00–04:59) to avoid object-store stampedes; created on provision,
+  removed on teardown.
+- `BuildRecoveryCluster`: PITR bootstrap shape (external origin + optional targetTime,
+  backup section stripped so clones never archive into the source's WAL stream) —
+  shared by the restore-verification job, instant restore, and Phase 4 branching.
+- Reconciler binary refuses to run without a backup bucket outside dev (risk R-2).
+- Tests: backup spec shape, schedule determinism (idempotency), nil-config omission,
+  recovery cluster shape incl. latest-vs-targetTime.
+
 ### Pending in Phase 2
-- WAL archiving/PITR wiring (barman-cloud object-store config on the Cluster spec) +
-  nightly restore-verification job; reconciler applying managed roles/databases to live
-  clusters (k8s Secrets + CNPG managed roles); TLS cert issuance per endpoint; audit
-  writes moved into mutation transactions; live-cluster validation on kind/staging
-  (fake-client coverage only so far — this environment has no Docker daemon).
+- Nightly restore-verification job execution + backup-credentials secret replication
+  into project namespaces; reconciler applying managed roles/databases to live clusters;
+  TLS cert issuance per endpoint; audit writes moved into mutation transactions;
+  live-cluster validation on kind/staging (fake-client coverage only so far — this
+  environment has no Docker daemon).
 
 ## [Phase 1] — 2026-07-17
 

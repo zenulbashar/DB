@@ -27,13 +27,14 @@ type Source interface {
 }
 
 type Engine struct {
-	src Source
-	kc  client.Client
-	log *slog.Logger
+	src    Source
+	kc     client.Client
+	backup *BackupConfig // nil disables archiving/backups (local dev only)
+	log    *slog.Logger
 }
 
-func New(src Source, kc client.Client, log *slog.Logger) *Engine {
-	return &Engine{src: src, kc: kc, log: log}
+func New(src Source, kc client.Client, backup *BackupConfig, log *slog.Logger) *Engine {
+	return &Engine{src: src, kc: kc, backup: backup, log: log}
 }
 
 // Scheme returns a runtime.Scheme covering everything the engine touches —
@@ -41,7 +42,7 @@ func New(src Source, kc client.Client, log *slog.Logger) *Engine {
 func Scheme() *runtime.Scheme {
 	s := runtime.NewScheme()
 	_ = scheme.AddToScheme(s)
-	for _, gvk := range []schema.GroupVersionKind{ClusterGVK, PoolerGVK} {
+	for _, gvk := range []schema.GroupVersionKind{ClusterGVK, PoolerGVK, ScheduledBackupGVK} {
 		s.AddKnownTypeWithName(gvk, &unstructured.Unstructured{})
 		s.AddKnownTypeWithName(gvk.GroupVersion().WithKind(gvk.Kind+"List"), &unstructured.UnstructuredList{})
 	}
@@ -77,7 +78,10 @@ func (e *Engine) ReconcileOnce(ctx context.Context) error {
 func (e *Engine) provision(ctx context.Context, w postgres.BranchWork) error {
 	objs := []*unstructured.Unstructured{BuildNamespace(w), BuildResourceQuota(w)}
 	objs = append(objs, BuildNetworkPolicies(w)...)
-	objs = append(objs, BuildCluster(w), BuildPooler(w))
+	objs = append(objs, BuildCluster(w, e.backup), BuildPooler(w))
+	if e.backup != nil {
+		objs = append(objs, BuildScheduledBackup(w))
+	}
 	for _, o := range objs {
 		if err := e.ensure(ctx, o); err != nil {
 			return fmt.Errorf("ensure %s/%s: %w", o.GetKind(), o.GetName(), err)
@@ -102,6 +106,7 @@ func (e *Engine) teardown(ctx context.Context, w postgres.BranchWork) error {
 		gvk  schema.GroupVersionKind
 		name string
 	}{
+		{ScheduledBackupGVK, ClusterName(w.Branch.ID) + "-nightly"},
 		{PoolerGVK, PoolerName(w.Branch.ID)},
 		{ClusterGVK, ClusterName(w.Branch.ID)},
 	} {
