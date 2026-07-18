@@ -58,9 +58,15 @@ func New(cp ControlPlane, opts Options) *Runner {
 	return &Runner{cp: cp, opts: opts}
 }
 
-// Step claims one job and advances it exactly one state, returning the job it
-// acted on (nil when the queue was empty). Any stage error transitions the
-// job to failed with the message, so a poisoned job never wedges the queue.
+// Step claims one job and advances it at most one state. It returns the job
+// ONLY when it actually made progress (a state transition) or hit an error;
+// it returns (nil, nil) both when the queue is empty AND when a claimed job is
+// legitimately waiting (initial copy not done, replication lag not yet zero).
+// That distinction lets the drain loop idle on its ticker instead of
+// hot-spinning on a not-yet-ready job (audit finding). Any stage error
+// transitions the job to failed — and for logical-replication jobs also tears
+// down the replication link so a failed migration cannot leak a WAL-retaining
+// slot (audit finding).
 func (r *Runner) Step(ctx context.Context) (*Job, error) {
 	job, err := r.cp.Claim(ctx)
 	if err != nil {
@@ -69,45 +75,81 @@ func (r *Runner) Step(ctx context.Context) (*Job, error) {
 	if job == nil {
 		return nil, nil
 	}
-	if err := r.advance(ctx, job); err != nil {
+	progressed, err := r.advance(ctx, job)
+	if err != nil {
+		r.cleanupOnFailure(ctx, job)
 		msg := err.Error()
 		// Best-effort fail marking; the control plane rejects fail-from-
 		// terminal, which is fine (nothing to do).
 		_ = r.cp.Transition(ctx, job.ID, "failed", nil, nil, &msg)
 		return job, err
 	}
+	if !progressed {
+		return nil, nil
+	}
 	return job, nil
 }
 
-func (r *Runner) advance(ctx context.Context, job *Job) error {
+// advance drives one stage. It returns progressed=true only when it issued a
+// state transition; false means the job stays in its current state (a legal
+// wait), which must NOT be turned into a self-transition (the state machine
+// has no self-edges — issuing one fails the whole migration; audit finding).
+func (r *Runner) advance(ctx context.Context, job *Job) (bool, error) {
 	switch job.State {
 	case "pending":
-		return r.cp.Transition(ctx, job.ID, "preflight", nil, nil, nil)
+		return true, r.cp.Transition(ctx, job.ID, "preflight", nil, nil, nil)
 
 	case "preflight":
 		report, err := r.runPreflight(ctx, job)
 		if err != nil {
-			return err
+			return false, err
 		}
-		return r.cp.Transition(ctx, job.ID, "schema_copy", report, nil, nil)
+		return true, r.cp.Transition(ctx, job.ID, "schema_copy", report, nil, nil)
 
 	case "schema_copy":
-		return r.runSchemaCopy(ctx, job)
+		return true, r.runSchemaCopy(ctx, job)
 
 	case "initial_copy":
-		// logical mode: subscription's copy is underway; wait then advance.
 		return r.waitInitialCopy(ctx, job)
 
 	case "live_sync":
 		return r.runCutoverReady(ctx, job)
 
 	case "cut_over":
-		return r.runVerify(ctx, job)
+		return true, r.runVerify(ctx, job)
 
 	default:
 		// pending-cutover (human gate) and terminal states are not the
 		// runner's to advance.
-		return nil
+		return false, nil
+	}
+}
+
+// cleanupOnFailure tears down replication for a failing logical job so a
+// half-set-up sync cannot leak a slot/publication. It dials the two ends
+// independently: if the target is unreachable (a common failure mode) it can
+// still drop the WAL-retaining slot on the source, which is the part that
+// matters. Best-effort and safe to call even if nothing was set up (the drop
+// helpers use existence checks).
+func (r *Runner) cleanupOnFailure(ctx context.Context, job *Job) {
+	if job.Mode != "logical_replication" {
+		return
+	}
+	sync := r.syncFor(job)
+	source, sErr := pgx.Connect(ctx, job.SourceURL)
+	if sErr == nil {
+		defer source.Close(ctx)
+	}
+	target, tErr := pgx.Connect(ctx, job.TargetURL)
+	if tErr == nil {
+		defer target.Close(ctx)
+	}
+	switch {
+	case sErr == nil && tErr == nil:
+		_ = logicalrepl.Abort(ctx, source, target, sync)
+	case sErr == nil:
+		// Target down: at least free the source's slot + publication.
+		_ = logicalrepl.DropSourceObjects(ctx, source, sync)
 	}
 }
 
@@ -164,40 +206,44 @@ func (r *Runner) runSchemaCopy(ctx context.Context, job *Job) error {
 	return r.cp.Transition(ctx, job.ID, "initial_copy", nil, nil, nil)
 }
 
-func (r *Runner) waitInitialCopy(ctx context.Context, job *Job) error {
+func (r *Runner) waitInitialCopy(ctx context.Context, job *Job) (bool, error) {
 	source, target, err := r.dial(ctx, job)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer source.Close(ctx)
 	defer target.Close(ctx)
 	done, pending, err := logicalrepl.InitialCopyDone(ctx, target, r.syncFor(job))
 	if err != nil {
-		return err
+		return false, err
 	}
 	if !done {
-		// Not an error — stay in initial_copy; the next Step re-checks.
-		return nil
+		// Legal wait: stay in initial_copy; the next Step re-checks. Do NOT
+		// issue a transition.
+		return false, nil
 	}
-	return r.cp.Transition(ctx, job.ID, "live_sync",
+	return true, r.cp.Transition(ctx, job.ID, "live_sync",
 		nil, map[string]any{"tables_pending": pending}, nil)
 }
 
-func (r *Runner) runCutoverReady(ctx context.Context, job *Job) error {
-	source, _, err := r.dial(ctx, job)
+func (r *Runner) runCutoverReady(ctx context.Context, job *Job) (bool, error) {
+	source, err := r.dialSource(ctx, job)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer source.Close(ctx)
 	lag, err := logicalrepl.LagBytes(ctx, source, r.syncFor(job))
 	if err != nil {
-		return err
+		return false, err
 	}
-	// Surface lag; only advance to the human gate when caught up.
 	if lag > 0 {
-		return r.cp.Transition(ctx, job.ID, "live_sync", nil, map[string]any{"lag_bytes": lag}, nil)
+		// Legal wait: replication is still catching up. Stay in live_sync —
+		// a live_sync -> live_sync self-transition is illegal and would fail
+		// the migration (audit finding); it almost always has non-zero lag on
+		// the first check, so this path is the common case.
+		return false, nil
 	}
-	return r.cp.Transition(ctx, job.ID, "cutover_ready", nil, map[string]any{"lag_bytes": 0}, nil)
+	return true, r.cp.Transition(ctx, job.ID, "cutover_ready", nil, map[string]any{"lag_bytes": 0}, nil)
 }
 
 func (r *Runner) runVerify(ctx context.Context, job *Job) error {
@@ -265,4 +311,14 @@ func (r *Runner) dial(ctx context.Context, job *Job) (source, target *pgx.Conn, 
 		return nil, nil, fmt.Errorf("dial target: %w", err)
 	}
 	return source, target, nil
+}
+
+// dialSource opens only the source connection (the lag check needs nothing
+// else — the previous code dialed the target too and leaked it every poll).
+func (r *Runner) dialSource(ctx context.Context, job *Job) (*pgx.Conn, error) {
+	conn, err := pgx.Connect(ctx, job.SourceURL)
+	if err != nil {
+		return nil, fmt.Errorf("dial source: %w", err)
+	}
+	return conn, nil
 }

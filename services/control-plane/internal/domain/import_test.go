@@ -28,6 +28,12 @@ func TestImportTransitions(t *testing.T) {
 		{ImportLogicalRepl, ImportLiveSync, ImportVerified, false},
 		{ImportLogicalRepl, ImportCutoverReady, ImportLiveSync, false},
 
+		// No self-edges: the runner must STAY (return no-progress) while
+		// waiting, never issue a same-state transition. A live_sync -> live_sync
+		// self-transition once failed every logical migration on any lag.
+		{ImportLogicalRepl, ImportLiveSync, ImportLiveSync, false},
+		{ImportLogicalRepl, ImportInitialCopy, ImportInitialCopy, false},
+
 		// Failure/abort from non-terminal; cut_over may fail but not abort.
 		{ImportLogicalRepl, ImportLiveSync, ImportFailed, true},
 		{ImportLogicalRepl, ImportLiveSync, ImportAborted, true},

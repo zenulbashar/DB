@@ -10,9 +10,12 @@ package importworker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"strings"
+	"time"
 
 	"github.com/zenulbashar/DB/services/import-engine/runner"
 
@@ -33,19 +36,45 @@ type Adapter struct {
 	store    *postgres.Store
 	keyring  *secrets.Keyring
 	resolver TargetResolver
+	workerID string
+	leaseTTL time.Duration
 }
 
-func NewAdapter(st *postgres.Store, keyring *secrets.Keyring, resolver TargetResolver) *Adapter {
-	return &Adapter{store: st, keyring: keyring, resolver: resolver}
+// DefaultLeaseTTL bounds how long a claimed-but-silent worker holds an import
+// before another replica may resume it. It must exceed the longest single
+// stage (a large dump/restore) so a healthy-but-busy worker is never stolen
+// from; a crashed worker's import waits at most this long to be picked up.
+const DefaultLeaseTTL = 30 * time.Minute
+
+func NewAdapter(st *postgres.Store, keyring *secrets.Keyring, resolver TargetResolver, opts ...Option) *Adapter {
+	a := &Adapter{store: st, keyring: keyring, resolver: resolver,
+		workerID: defaultWorkerID(), leaseTTL: DefaultLeaseTTL}
+	for _, o := range opts {
+		o(a)
+	}
+	return a
+}
+
+type Option func(*Adapter)
+
+func WithWorkerID(id string) Option       { return func(a *Adapter) { a.workerID = id } }
+func WithLeaseTTL(d time.Duration) Option { return func(a *Adapter) { a.leaseTTL = d } }
+
+func defaultWorkerID() string {
+	host, err := os.Hostname()
+	if err != nil || host == "" {
+		host = "worker"
+	}
+	return fmt.Sprintf("%s-%d", host, os.Getpid())
 }
 
 var _ runner.ControlPlane = (*Adapter)(nil)
 
-// Claim returns the next actionable import as a runner.Job, or nil when the
-// queue is empty. The source URL is decrypted here, in the worker's memory,
-// and never leaves it except as a connection to the source database.
+// Claim leases and returns the next actionable import as a runner.Job, or nil
+// when nothing is claimable. The source URL is decrypted here, in the worker's
+// memory, and never leaves it except as a connection to the source database.
 func (a *Adapter) Claim(ctx context.Context) (*runner.Job, error) {
-	c, err := a.store.ClaimActionableImport(ctx)
+	c, err := a.store.ClaimActionableImport(ctx, a.workerID, a.leaseTTL)
 	if err != nil || c == nil {
 		return nil, err
 	}
@@ -80,31 +109,56 @@ func (a *Adapter) Claim(ctx context.Context) (*runner.Job, error) {
 	}, nil
 }
 
-// urlToConnInfo converts a postgres:// URL into the space-separated libpq
-// conninfo the target server uses to reach the source during logical
-// replication.
+// urlToConnInfo converts a postgres:// URL into a libpq conninfo the target
+// server uses to reach the source during logical replication. Each value is
+// quoted/escaped per libpq rules so a password (or any field) containing a
+// space, quote, or backslash cannot break the conninfo or inject a keyword
+// (audit finding). A parse failure returns a fixed, credential-free error —
+// the raw URL must never ride out inside a *url.Error (audit finding).
 func urlToConnInfo(raw string) (string, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
-		return "", err
+		return "", errors.New("source url: parse failed")
 	}
-	host := u.Hostname()
 	port := u.Port()
 	if port == "" {
 		port = "5432"
 	}
-	db := strings.TrimPrefix(u.Path, "/")
-	info := fmt.Sprintf("host=%s port=%s dbname=%s", host, port, db)
+	pairs := [][2]string{
+		{"host", u.Hostname()},
+		{"port", port},
+		{"dbname", strings.TrimPrefix(u.Path, "/")},
+	}
 	if user := u.User.Username(); user != "" {
-		info += " user=" + user
+		pairs = append(pairs, [2]string{"user", user})
 	}
 	if pw, ok := u.User.Password(); ok {
-		info += " password=" + pw
+		pairs = append(pairs, [2]string{"password", pw})
 	}
 	if sslmode := u.Query().Get("sslmode"); sslmode != "" {
-		info += " sslmode=" + sslmode
+		pairs = append(pairs, [2]string{"sslmode", sslmode})
 	}
-	return info, nil
+	var b strings.Builder
+	for i, kv := range pairs {
+		if i > 0 {
+			b.WriteByte(' ')
+		}
+		b.WriteString(kv[0])
+		b.WriteByte('=')
+		b.WriteString(quoteConnInfo(kv[1]))
+	}
+	return b.String(), nil
+}
+
+// quoteConnInfo wraps a value in single quotes when it is empty or contains
+// whitespace/quote/backslash, escaping backslashes and single quotes (libpq
+// keyword/value rules).
+func quoteConnInfo(v string) string {
+	if v != "" && !strings.ContainsAny(v, " \t\n\r'\\") {
+		return v
+	}
+	r := strings.NewReplacer(`\`, `\\`, `'`, `\'`)
+	return "'" + r.Replace(v) + "'"
 }
 
 func toImportState(s string) domain.ImportState { return domain.ImportState(s) }
@@ -131,18 +185,31 @@ func ProductionTargetResolver(st *postgres.Store, keyring *secrets.Keyring) Targ
 		if host == "" {
 			return "", fmt.Errorf("branch has no direct endpoint")
 		}
-		roles, err := st.ListDBRoles(ctx, c.OrgID, br.ID)
-		if err != nil {
-			return "", err
-		}
 		dbs, err := st.ListDatabases(ctx, c.OrgID, br.ID)
 		if err != nil {
 			return "", err
 		}
-		if len(roles) == 0 || len(dbs) == 0 {
+		roles, err := st.ListDBRoles(ctx, c.OrgID, br.ID)
+		if err != nil {
+			return "", err
+		}
+		if len(dbs) == 0 || len(roles) == 0 {
 			return "", fmt.Errorf("target branch has no owner role or database yet")
 		}
-		ciphertext, err := st.GetDBRoleSecret(ctx, c.OrgID, br.ID, roles[0].Name)
+		// Connect as the database's ACTUAL owner role, matched by id — not an
+		// arbitrary roles[0]/dbs[0] pairing (audit finding: list order is not
+		// guaranteed and the first role may not own the first database).
+		db := dbs[0]
+		ownerName := ""
+		for _, r := range roles {
+			if r.ID == db.OwnerRoleID {
+				ownerName = r.Name
+			}
+		}
+		if ownerName == "" {
+			return "", fmt.Errorf("owner role for database %q not found", db.Name)
+		}
+		ciphertext, err := st.GetDBRoleSecret(ctx, c.OrgID, br.ID, ownerName)
 		if err != nil {
 			return "", err
 		}
@@ -151,7 +218,7 @@ func ProductionTargetResolver(st *postgres.Store, keyring *secrets.Keyring) Targ
 			return "", err
 		}
 		return fmt.Sprintf("postgresql://%s:%s@%s/%s?sslmode=require",
-			roles[0].Name, string(pw), host, dbs[0].Name), nil
+			ownerName, string(pw), host, db.Name), nil
 	}
 }
 

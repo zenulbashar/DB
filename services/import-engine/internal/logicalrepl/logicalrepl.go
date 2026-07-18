@@ -239,6 +239,25 @@ func Abort(ctx context.Context, source, target *pgx.Conn, s Sync) error {
 	return Cutover(ctx, source, target, s)
 }
 
+// DropSourceObjects frees the SOURCE-side replication objects (the
+// WAL-retaining slot and the publication). Use it when the target is
+// unreachable during cleanup: the subscription cannot be dropped, but the slot
+// MUST be, or it retains WAL on the source forever.
+func DropSourceObjects(ctx context.Context, source *pgx.Conn, s Sync) error {
+	if err := s.validate(); err != nil {
+		return err
+	}
+	if _, err := source.Exec(ctx,
+		`SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots WHERE slot_name = $1`,
+		s.Name); err != nil {
+		return fmt.Errorf("drop replication slot: %w", err)
+	}
+	if _, err := source.Exec(ctx, `DROP PUBLICATION IF EXISTS `+s.Name); err != nil {
+		return fmt.Errorf("drop publication: %w", err)
+	}
+	return nil
+}
+
 func escapeLiteral(v string) string {
 	out := []byte{'\''}
 	for i := 0; i < len(v); i++ {

@@ -572,6 +572,53 @@ func TestSlugCollisionFillsGaps(t *testing.T) {
 	}
 }
 
+// Regression for the CRITICAL audit finding: the claim released its lock at
+// commit, so a second worker re-claimed the same import mid-stage and drove a
+// concurrent, corrupting dump/restore. The lease must give one worker
+// exclusive ownership across the whole stage, and expire so a crashed worker's
+// import can be resumed.
+func TestImportClaimLease(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	res := bootstrapOrg(t, s, "acme")
+	pr, err := s.CreateProject(ctx, store.CreateProjectParams{OrgID: res.Org.ID, Name: "App", Region: "syd1", PGVersion: 17})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateImport(ctx, store.CreateImportParams{
+		OrgID: res.Org.ID, ProjectID: pr.ID, SourceKind: domain.ImportNeon, Mode: domain.ImportDumpRestore,
+		SourceSecret: store.SecretMaterial{Ciphertext: []byte("ct"), KeyVersion: 1},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Worker A claims and holds the lease.
+	a, err := s.ClaimActionableImport(ctx, "worker-A", 30*time.Minute)
+	if err != nil || a == nil {
+		t.Fatalf("A claim: %v (%v)", a, err)
+	}
+	// Worker B, polling mid-stage, must NOT get the same import.
+	b, err := s.ClaimActionableImport(ctx, "worker-B", 30*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b != nil {
+		t.Fatalf("worker B double-claimed import %s while A holds the lease", b.ImportID)
+	}
+	// Worker A may re-claim its own import (to drive the next stage).
+	again, err := s.ClaimActionableImport(ctx, "worker-A", 30*time.Minute)
+	if err != nil || again == nil || again.ImportID != a.ImportID {
+		t.Fatalf("A re-claim: %v (%v)", again, err)
+	}
+
+	// With a zero TTL the lease is always expired, so B can take over a
+	// crashed worker's import.
+	takeover, err := s.ClaimActionableImport(ctx, "worker-B", 0)
+	if err != nil || takeover == nil || takeover.ImportID != a.ImportID {
+		t.Fatalf("B takeover after lease expiry: %v (%v)", takeover, err)
+	}
+}
+
 func TestLastOwnerRule(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()
