@@ -18,8 +18,21 @@ All notable changes to this repository. Format loosely follows [Keep a Changelog
 - Tests: unit lifecycle/validation/scope suites; integration coverage for atomic
   default-branch provisioning, cross-org RLS on the new tables, and cascade semantics.
 
+### Added (2b: pg-gateway v1, 2026-07-18)
+- `services/pg-gateway`: Postgres wire-protocol TCP gateway (ADR-007) — SSLRequest/GSSENC/
+  Cancel/Startup handshake handling, client TLS termination, **SNI routing**
+  (`ep-<id>.<region>.db.nimbus.app` → endpoint), `options=endpoint%3D<id>` fallback with the
+  routing token **stripped before backend forwarding** (backends reject unknown server args —
+  caught by the e2e suite), per-endpoint connection caps, suspended-endpoint rejection
+  (57P03; Phase 4 replaces with hold-and-wake), Postgres-native error responses, Prometheus
+  metrics (`pggw_*`) + health endpoint, hot-reloading file route table that keeps the last
+  good version on reload failure.
+- E2E integration tests drive a real pgx client through the gateway to live Postgres:
+  SNI routing (simple + extended protocol), options fallback, unknown/suspended endpoint
+  rejection, connection-cap enforcement and release, plaintext rejection (TLS-only posture).
+- CI: dedicated pg-gateway job (gofmt/vet/e2e vs postgres:17/build); Makefile targets.
+
 ### Pending in Phase 2
-- 2b: pg-gateway v1 (SNI routing, startup-parameter fallback, connection counters).
 - 2c: reconciler + CNPG provisioning, WAL archiving/PITR, restore-verification job,
   audit writes moved into mutation transactions.
 
