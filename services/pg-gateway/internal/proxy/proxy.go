@@ -1,7 +1,9 @@
 // Package proxy implements the pg-gateway data path (ADR-007): terminate
 // client TLS, route by SNI (or the options fallback) to the branch's backend,
-// then become a transparent byte pipe. Wake-on-connect holding arrives in
-// Phase 4; v1 rejects suspended endpoints with a clear error.
+// then become a transparent byte pipe. On a suspended endpoint it HOLDS the
+// connection and triggers a wake (Phase 4, ADR-014), completing the connection
+// once the branch is ready; if no waker is configured it rejects with a clear
+// error as before.
 package proxy
 
 import (
@@ -16,7 +18,15 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/zenulbashar/DB/services/pg-gateway/internal/routes"
+	"github.com/zenulbashar/DB/services/pg-gateway/internal/wake"
 )
+
+// RouteTable is the gateway's view of the endpoint→backend routing table. The
+// concrete *routes.Table satisfies it; tests use a fake that can flip a route
+// from suspended to ready mid-hold.
+type RouteTable interface {
+	Lookup(endpointID string) (routes.Route, bool)
+}
 
 type Config struct {
 	TLS *tls.Config
@@ -25,6 +35,16 @@ type Config struct {
 	AllowInsecure bool
 	// DialTimeout bounds the backend dial.
 	DialTimeout time.Duration
+	// Waker triggers a wake for a suspended endpoint's branch. Nil disables
+	// wake-on-connect — the gateway then rejects suspended endpoints (the
+	// pre-Phase-4 behaviour).
+	Waker wake.Waker
+	// WakeTimeout bounds how long a connection is held waiting for its branch to
+	// become ready (the honest Gen-1 cold-start budget; ADR-004 p95 < 25 s).
+	WakeTimeout time.Duration
+	// WakePoll is how often the held connection re-checks the route table for
+	// readiness.
+	WakePoll time.Duration
 }
 
 type Metrics struct {
@@ -32,6 +52,10 @@ type Metrics struct {
 	ConnsTotal    *prometheus.CounterVec
 	Bytes         *prometheus.CounterVec
 	ConnectErrors *prometheus.CounterVec
+	// Wake-on-connect (Phase 4).
+	Wakes       *prometheus.CounterVec // by result: ready|timeout|error
+	WakeWaitSec prometheus.Histogram   // hold duration until ready
+	HoldsActive prometheus.Gauge       // connections currently held waiting to wake
 }
 
 func NewMetrics(reg prometheus.Registerer) *Metrics {
@@ -48,23 +72,41 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		ConnectErrors: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "pggw_connect_errors_total", Help: "Connection-phase failures by reason.",
 		}, []string{"reason"}),
+		Wakes: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "pggw_wakes_total", Help: "Wake-on-connect outcomes.",
+		}, []string{"result"}),
+		WakeWaitSec: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name: "pggw_wake_wait_seconds", Help: "Time a connection was held until its branch became ready.",
+			// Buckets around the Gen-1 target (p50 < 10 s, p95 < 25 s; ADR-004).
+			Buckets: []float64{0.5, 1, 2, 5, 10, 15, 20, 25, 30, 45},
+		}),
+		HoldsActive: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "pggw_wake_holds_active", Help: "Connections currently held waiting for a wake.",
+		}),
 	}
-	reg.MustRegister(m.ActiveConns, m.ConnsTotal, m.Bytes, m.ConnectErrors)
+	reg.MustRegister(m.ActiveConns, m.ConnsTotal, m.Bytes, m.ConnectErrors,
+		m.Wakes, m.WakeWaitSec, m.HoldsActive)
 	return m
 }
 
 type Server struct {
 	cfg    Config
-	table  *routes.Table
+	table  RouteTable
 	log    *slog.Logger
 	m      *Metrics
 	countM sync.Mutex
 	counts map[string]int
 }
 
-func New(cfg Config, table *routes.Table, m *Metrics, log *slog.Logger) *Server {
+func New(cfg Config, table RouteTable, m *Metrics, log *slog.Logger) *Server {
 	if cfg.DialTimeout == 0 {
 		cfg.DialTimeout = 10 * time.Second
+	}
+	if cfg.WakeTimeout == 0 {
+		cfg.WakeTimeout = 30 * time.Second
+	}
+	if cfg.WakePoll == 0 {
+		cfg.WakePoll = 500 * time.Millisecond
 	}
 	return &Server{cfg: cfg, table: table, log: log, m: m, counts: map[string]int{}}
 }
@@ -154,9 +196,11 @@ func (s *Server) handle(ctx context.Context, raw net.Conn) {
 		return
 	}
 	if route.State == routes.StateSuspended {
-		// Phase 4 replaces this with hold-and-wake.
-		s.fail(client, "suspended", "57P03", "endpoint is suspended")
-		return
+		ready, ok := s.holdAndWake(ctx, client, endpointID, route)
+		if !ok {
+			return // holdAndWake already answered the client
+		}
+		route = ready
 	}
 	if !s.acquire(endpointID, route.MaxConns) {
 		s.fail(client, "too-many-connections", "53300",
@@ -185,6 +229,54 @@ func (s *Server) handle(ctx context.Context, raw net.Conn) {
 	defer s.m.ActiveConns.WithLabelValues(endpointID).Dec()
 
 	s.pipe(client, backend, endpointID)
+}
+
+// holdAndWake handles a connection to a suspended endpoint (ADR-014): trigger a
+// coalesced wake for its branch, then hold the connection — re-checking the
+// route table — until the endpoint reports ready (proceed) or the wake budget
+// expires (fail). Returns the now-ready route and true to continue, or false
+// when it has already answered the client. With no waker configured, or a route
+// missing its branch id, it falls back to the pre-Phase-4 clean rejection.
+func (s *Server) holdAndWake(ctx context.Context, client net.Conn, endpointID string, route routes.Route) (routes.Route, bool) {
+	if s.cfg.Waker == nil || route.BranchID == "" {
+		s.fail(client, "suspended", "57P03", "endpoint is suspended")
+		return route, false
+	}
+	s.m.HoldsActive.Inc()
+	defer s.m.HoldsActive.Dec()
+	// Hold the socket open across the wake budget; the startup-phase deadline
+	// (30 s) would otherwise trip mid-wake.
+	_ = client.SetDeadline(time.Now().Add(s.cfg.WakeTimeout + 10*time.Second))
+
+	start := time.Now()
+	if err := s.cfg.Waker.Wake(ctx, route.BranchID); err != nil {
+		s.m.Wakes.WithLabelValues("error").Inc()
+		if s.log != nil {
+			s.log.Warn("wake trigger failed", "branch", route.BranchID, "err", err)
+		}
+		s.fail(client, "wake-failed", "57P03", "endpoint is suspended and could not be woken; retry shortly")
+		return route, false
+	}
+
+	deadline := time.Now().Add(s.cfg.WakeTimeout)
+	for {
+		if r, ok := s.table.Lookup(endpointID); ok && r.State == routes.StateReady {
+			s.m.Wakes.WithLabelValues("ready").Inc()
+			s.m.WakeWaitSec.Observe(time.Since(start).Seconds())
+			return r, true
+		}
+		if time.Now().After(deadline) {
+			s.m.Wakes.WithLabelValues("timeout").Inc()
+			s.fail(client, "wake-timeout", "57P03", "endpoint did not wake in time; retry shortly")
+			return route, false
+		}
+		select {
+		case <-ctx.Done():
+			// Server shutting down; drop the held connection quietly.
+			return route, false
+		case <-time.After(s.cfg.WakePoll):
+		}
+	}
 }
 
 // pipe copies bytes both ways until either side closes.

@@ -2,6 +2,40 @@
 
 All notable changes to this repository. Format loosely follows [Keep a Changelog](https://keepachangelog.com/); one entry per phase gate plus notable intermediate merges.
 
+## [Phase 4 — gateway hold-and-wake] — 2026-07-18
+
+Scale-to-zero wake-on-connect goes live end to end (ADR-014): the pg-gateway now **holds** a
+connection to a suspended endpoint, triggers a wake, and completes the connection once the branch
+is ready — instead of rejecting it. This is the user-visible completion of the wake path built by
+the two prior increments (the compute state machine + the internal wake endpoint).
+
+### Added
+- **`internal/wake`** — the wake trigger: a single authenticated POST to the control-plane's
+  `POST /internal/branches/{br}/wake`, **coalesced per branch** via `singleflight` so a connection
+  storm produces one wake, not one per connection (SECURITY_MODEL §2). The POST runs on its own
+  bounded context, decoupled from any caller's cancellation, so one client giving up cannot abort
+  the shared wake for the others.
+- **Gateway hold-and-wake** (`proxy.holdAndWake`) — on a suspended endpoint the gateway triggers
+  the wake, extends the connection deadline across the wake budget, and polls the route table until
+  the endpoint reports `ready` (then proceeds to dial + forward + pipe) or the `WakeTimeout`
+  (default 30 s, honest Gen-1 budget — ADR-004 p95 < 25 s) expires (clean `57P03` retry hint).
+  Falls back to the pre-Phase-4 clean rejection when no waker is configured or a route has no
+  `branch_id`.
+- **Wake metrics** — `pggw_wakes_total{result}` (ready|timeout|error), `pggw_wake_wait_seconds`
+  (histogram bucketed around the p50<10s/p95<25s target), `pggw_wake_holds_active` (gauge). The
+  DEPLOYMENT §6 wake SLO is now directly measurable.
+- **Config** — `PGGW_CONTROL_PLANE_URL` + `PGGW_GATEWAY_TOKEN` enable wake-on-connect (both
+  required; wake is disabled otherwise); `PGGW_WAKE_TIMEOUT` tunes the hold budget. The proxy's
+  route table is now behind a `RouteTable` interface for testability.
+
+### Tests
+- `wake`: request shape (method/path/bearer), non-2xx → error, per-branch coalescing (20
+  concurrent → 1 POST; distinct branches not coalesced), caller-cancellation isolation — all under
+  `-race`. `proxy`: `holdAndWake` proceeds-when-ready, times-out, rejects without a waker / without
+  a `branch_id`, fails on wake error, and aborts on context cancel. Integration: a **real pgx
+  client** connects through the gateway to a *suspended* endpoint, is held, woken, and completes
+  `SELECT 1` against live Postgres once the route flips to ready.
+
 ## [Phase 4 — gateway wake API surface] — 2026-07-18
 
 The control-plane half of gateway wake-on-connect (ADR-014 addendum): the privileged endpoint the

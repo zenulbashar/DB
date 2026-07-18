@@ -17,6 +17,7 @@ import (
 
 	"github.com/zenulbashar/DB/services/pg-gateway/internal/proxy"
 	"github.com/zenulbashar/DB/services/pg-gateway/internal/routes"
+	"github.com/zenulbashar/DB/services/pg-gateway/internal/wake"
 )
 
 func main() {
@@ -44,10 +45,26 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Wake-on-connect (ADR-014): enabled only when both the control-plane URL
+	// and the shared gateway token are configured; otherwise suspended endpoints
+	// are cleanly rejected as before.
+	var waker wake.Waker
+	cpURL := os.Getenv("PGGW_CONTROL_PLANE_URL")
+	gwToken := os.Getenv("PGGW_GATEWAY_TOKEN")
+	wakeTimeout := getdur("PGGW_WAKE_TIMEOUT", 30*time.Second)
+	if cpURL != "" && gwToken != "" {
+		waker = wake.NewHTTP(cpURL, gwToken, 10*time.Second)
+		log.Info("wake-on-connect enabled", "control_plane", cpURL, "wake_timeout", wakeTimeout)
+	} else {
+		log.Info("wake-on-connect disabled (set PGGW_CONTROL_PLANE_URL and PGGW_GATEWAY_TOKEN to enable)")
+	}
+
 	reg := prometheus.NewRegistry()
 	m := proxy.NewMetrics(reg)
 	srv := proxy.New(proxy.Config{
-		TLS: &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12},
+		TLS:         &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12},
+		Waker:       waker,
+		WakeTimeout: wakeTimeout,
 	}, table, m, log)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -82,6 +99,15 @@ func main() {
 func getenv(k, def string) string {
 	if v := os.Getenv(k); v != "" {
 		return v
+	}
+	return def
+}
+
+func getdur(k string, def time.Duration) time.Duration {
+	if v := os.Getenv(k); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			return d
+		}
 	}
 	return def
 }
