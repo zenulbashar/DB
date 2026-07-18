@@ -2,6 +2,20 @@
 
 All notable changes to this repository. Format loosely follows [Keep a Changelog](https://keepachangelog.com/); one entry per phase gate plus notable intermediate merges.
 
+## [Phase 5 groundwork — pulled forward]
+
+### Added (import-engine preflight, 2026-07-18)
+- `services/import-engine`: source-database preflight (MIGRATION_STRATEGY §2 stage 1) —
+  read-only catalog inspection producing the gating report: server version, database size,
+  `wal_level`, replication-slot capacity, REPLICATION privilege, extensions vs the target
+  allowlist, per-table PK/replica-identity audit, enums, sequences; mode recommendation
+  (dump_restore < 10 GiB < logical_replication) and blocker/warning derivation with
+  per-source remediation (Neon direct-host/autosuspend, Supabase platform-schema scope,
+  RDS parameter-group + slot-storage, Azure server parameter, generic).
+- `cmd/preflight` CLI printing the JSON report (exit 3 on blockers).
+- Integration tests against real Postgres fixtures (enum + PK-less + serial tables);
+  live CLI smoke verified against the local instance. CI job + Makefile added.
+
 ## [Phase 2 — in progress]
 
 ### Added (2a: branch & endpoint resource model, 2026-07-17)
