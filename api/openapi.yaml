@@ -355,10 +355,12 @@ paths:
               required: [org_id, name]
       responses:
         "201":
-          description: Created project record
+          description: |
+            Created project with its seeded owner role and database on the
+            default branch. The role password is returned exactly once.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Project" }
+              schema: { $ref: "#/components/schemas/ProjectCreated" }
         "409": { $ref: "#/components/responses/Problem" }
 
   /projects/{prj}:
@@ -403,6 +405,51 @@ paths:
       responses:
         "204": { description: Deleted (soft; lifecycle per MULTI_TENANCY §5) }
         "404": { $ref: "#/components/responses/Problem" }
+
+  /projects/{prj}/connection-uri:
+    parameters:
+      - name: prj
+        in: path
+        required: true
+        schema: { type: string }
+      - name: branch
+        in: query
+        schema: { type: string }
+      - name: endpoint
+        in: query
+        schema: { type: string, enum: [rw_pooled, rw_direct, ro_pooled], default: rw_pooled }
+      - name: role
+        in: query
+        schema: { type: string }
+      - name: database
+        in: query
+        schema: { type: string }
+      - name: reveal
+        in: query
+        schema: { type: boolean, default: false }
+        description: Requires `roles:write`; every reveal is audit-logged.
+    get:
+      tags: [projects]
+      operationId: getConnectionUri
+      summary: Assemble a connection string (masked by default)
+      responses:
+        "200":
+          description: Connection URI (never cached)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  uri: { type: string }
+                  endpoint: { type: string }
+                  branch_id: { type: string }
+                  role: { type: string }
+                  database: { type: string }
+                  revealed: { type: boolean }
+                required: [uri, endpoint, branch_id, role, database, revealed]
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
 
   /projects/{prj}/branches:
     parameters:
@@ -515,6 +562,169 @@ paths:
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
+
+  /branches/{br}/roles:
+    parameters:
+      - name: br
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [branches]
+      operationId: listDbRoles
+      summary: List database roles
+      responses:
+        "200":
+          description: Roles (never includes secret material)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/DBRole" }
+                required: [data]
+        "404": { $ref: "#/components/responses/Problem" }
+    post:
+      tags: [branches]
+      operationId: createDbRole
+      summary: Create a database role
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  pattern: "^[a-z_][a-z0-9_]{0,62}$"
+              required: [name]
+      responses:
+        "201":
+          description: Created role — password shown exactly once
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DBRoleWithPassword" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+
+  /branches/{br}/roles/{role}:
+    parameters:
+      - name: br
+        in: path
+        required: true
+        schema: { type: string }
+      - name: role
+        in: path
+        required: true
+        schema: { type: string }
+    delete:
+      tags: [branches]
+      operationId: deleteDbRole
+      summary: Delete a database role
+      responses:
+        "204": { description: Deleted }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409":
+          description: Role owns a database
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
+  /branches/{br}/roles/{role}/reset-password:
+    parameters:
+      - name: br
+        in: path
+        required: true
+        schema: { type: string }
+      - name: role
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [branches]
+      operationId: resetDbRolePassword
+      summary: Reset a role's password
+      responses:
+        "200":
+          description: New password — shown exactly once
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name: { type: string }
+                  password: { type: string }
+                required: [name, password]
+        "404": { $ref: "#/components/responses/Problem" }
+
+  /branches/{br}/databases:
+    parameters:
+      - name: br
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [branches]
+      operationId: listDatabases
+      summary: List databases
+      responses:
+        "200":
+          description: Databases
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Database" }
+                required: [data]
+        "404": { $ref: "#/components/responses/Problem" }
+    post:
+      tags: [branches]
+      operationId: createDatabase
+      summary: Create a database
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  pattern: "^[a-z_][a-z0-9_]{0,62}$"
+                owner_role: { type: string }
+              required: [name, owner_role]
+      responses:
+        "201":
+          description: Created database
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Database" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+
+  /branches/{br}/databases/{db}:
+    parameters:
+      - name: br
+        in: path
+        required: true
+        schema: { type: string }
+      - name: db
+        in: path
+        required: true
+        schema: { type: string }
+    delete:
+      tags: [branches]
+      operationId: deleteDatabase
+      summary: Delete a database
+      responses:
+        "204": { description: Deleted }
+        "404": { $ref: "#/components/responses/Problem" }
 
   /branches/{br}/endpoints:
     parameters:
@@ -727,6 +937,54 @@ components:
         state: { $ref: "#/components/schemas/ResourceState" }
         created_at: { type: string, format: date-time }
       required: [id, branch_id, kind, host, state, created_at]
+
+    DBRole:
+      type: object
+      properties:
+        id: { type: string }
+        branch_id: { type: string }
+        name: { type: string }
+        created_at: { type: string, format: date-time }
+      required: [id, branch_id, name, created_at]
+
+    DBRoleWithPassword:
+      allOf:
+        - $ref: "#/components/schemas/DBRole"
+        - type: object
+          properties:
+            password:
+              type: string
+              description: Returned exactly once; store it now.
+          required: [password]
+
+    Database:
+      type: object
+      properties:
+        id: { type: string }
+        branch_id: { type: string }
+        name: { type: string }
+        owner_role_id: { type: string }
+        created_at: { type: string, format: date-time }
+      required: [id, branch_id, name, owner_role_id, created_at]
+
+    ProjectCreated:
+      type: object
+      properties:
+        project: { $ref: "#/components/schemas/Project" }
+        owner_role:
+          type: object
+          properties:
+            name: { type: string }
+            password:
+              type: string
+              description: Returned exactly once.
+          required: [name, password]
+        database:
+          type: object
+          properties:
+            name: { type: string }
+          required: [name]
+      required: [project, owner_role, database]
 
     AuditEntry:
       type: object

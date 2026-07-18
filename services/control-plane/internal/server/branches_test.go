@@ -30,15 +30,17 @@ func createProject(t *testing.T, e *env, name string) (id, defaultBranch string)
 	if status != http.StatusCreated {
 		t.Fatalf("create project = %d %s", status, body)
 	}
-	var prj struct {
-		ID              string  `json:"id"`
-		DefaultBranchID *string `json:"default_branch_id"`
+	var created struct {
+		Project struct {
+			ID              string  `json:"id"`
+			DefaultBranchID *string `json:"default_branch_id"`
+		} `json:"project"`
 	}
-	mustUnmarshal(t, body, &prj)
-	if prj.DefaultBranchID == nil {
+	mustUnmarshal(t, body, &created)
+	if created.Project.DefaultBranchID == nil {
 		t.Fatal("project must be created with a default branch")
 	}
-	return prj.ID, *prj.DefaultBranchID
+	return created.Project.ID, *created.Project.DefaultBranchID
 }
 
 func TestProjectCreatesDefaultBranchWithEndpoints(t *testing.T) {

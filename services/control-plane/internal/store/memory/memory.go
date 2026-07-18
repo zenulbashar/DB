@@ -25,30 +25,36 @@ type idemEntry struct {
 }
 
 type Store struct {
-	mu        sync.Mutex
-	orgs      map[string]domain.Org
-	users     map[string]domain.User
-	members   map[memberKey]domain.Member
-	keys      map[string]domain.APIKey
-	keyHash   map[string]string // hash -> key id
-	projects  map[string]domain.Project
-	branches  map[string]domain.Branch
-	endpoints map[string]domain.Endpoint
-	audit     []domain.AuditEntry
-	idem      map[idemKey]idemEntry
+	mu          sync.Mutex
+	orgs        map[string]domain.Org
+	users       map[string]domain.User
+	members     map[memberKey]domain.Member
+	keys        map[string]domain.APIKey
+	keyHash     map[string]string // hash -> key id
+	projects    map[string]domain.Project
+	branches    map[string]domain.Branch
+	endpoints   map[string]domain.Endpoint
+	roles       map[roleKey]domain.DBRole
+	roleSecrets map[roleKey][]byte
+	databases   map[dbKey]domain.Database
+	audit       []domain.AuditEntry
+	idem        map[idemKey]idemEntry
 }
 
 func New() *Store {
 	return &Store{
-		orgs:      map[string]domain.Org{},
-		users:     map[string]domain.User{},
-		members:   map[memberKey]domain.Member{},
-		keys:      map[string]domain.APIKey{},
-		keyHash:   map[string]string{},
-		projects:  map[string]domain.Project{},
-		branches:  map[string]domain.Branch{},
-		endpoints: map[string]domain.Endpoint{},
-		idem:      map[idemKey]idemEntry{},
+		orgs:        map[string]domain.Org{},
+		users:       map[string]domain.User{},
+		members:     map[memberKey]domain.Member{},
+		keys:        map[string]domain.APIKey{},
+		keyHash:     map[string]string{},
+		projects:    map[string]domain.Project{},
+		branches:    map[string]domain.Branch{},
+		endpoints:   map[string]domain.Endpoint{},
+		roles:       map[roleKey]domain.DBRole{},
+		roleSecrets: map[roleKey][]byte{},
+		databases:   map[dbKey]domain.Database{},
+		idem:        map[idemKey]idemEntry{},
 	}
 }
 
@@ -295,6 +301,17 @@ func (s *Store) CreateProject(_ context.Context, p store.CreateProjectParams) (*
 	}
 	pr.DefaultBranchID = &b.ID
 	s.projects[pr.ID] = pr
+	if p.Seed != nil {
+		role, err := s.createDBRoleLocked(store.CreateDBRoleParams{
+			OrgID: p.OrgID, BranchID: b.ID, Name: p.Seed.RoleName, Secret: p.Seed.Secret,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if _, err := s.createDatabaseLocked(p.OrgID, b.ID, p.Seed.DatabaseName, role.Name); err != nil {
+			return nil, err
+		}
+	}
 	return &pr, nil
 }
 

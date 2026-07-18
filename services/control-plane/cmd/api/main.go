@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/zenulbashar/DB/services/control-plane/internal/config"
+	"github.com/zenulbashar/DB/services/control-plane/internal/secrets"
 	"github.com/zenulbashar/DB/services/control-plane/internal/server"
 	"github.com/zenulbashar/DB/services/control-plane/internal/store/postgres"
 )
@@ -58,9 +59,17 @@ func main() {
 		return
 	}
 
+	keyring, err := secrets.ParseKeyring(cfg.KEKs, cfg.ActiveKEK)
+	if err != nil {
+		log.Error("keyring", "err", err)
+		os.Exit(1)
+	}
+
 	srv := &http.Server{
-		Addr:              ":" + cfg.Port,
-		Handler:           server.New(st, server.Config{BootstrapToken: cfg.BootstrapToken, Version: cfg.Version}, log),
+		Addr: ":" + cfg.Port,
+		Handler: server.New(st, server.Config{
+			BootstrapToken: cfg.BootstrapToken, Version: cfg.Version, Keyring: keyring,
+		}, log),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 

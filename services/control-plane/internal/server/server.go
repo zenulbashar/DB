@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/zenulbashar/DB/services/control-plane/internal/domain"
+	"github.com/zenulbashar/DB/services/control-plane/internal/secrets"
 	"github.com/zenulbashar/DB/services/control-plane/internal/store"
 )
 
@@ -18,6 +19,8 @@ type Config struct {
 	// (ADR-013). Empty disables the endpoint entirely.
 	BootstrapToken string
 	Version        string
+	// Keyring encrypts tenant secret material (SECURITY_MODEL §5). Required.
+	Keyring *secrets.Keyring
 }
 
 type Server struct {
@@ -32,6 +35,9 @@ func New(st store.Store, cfg Config, log *slog.Logger) *Server {
 	s.routes()
 	return s
 }
+
+// newPassword is indirected for tests that need deterministic credentials.
+func (s *Server) newPassword() (string, error) { return secrets.NewPassword() }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.mux.ServeHTTP(w, r) }
 
@@ -69,12 +75,22 @@ func (s *Server) routes() {
 			r.Delete("/", s.requireScope(domain.ScopeProjectsWrite, s.handleDeleteProject))
 			r.Get("/branches", s.requireScope(domain.ScopeBranchesRead, s.handleListBranches))
 			r.Post("/branches", s.requireScope(domain.ScopeBranchesWrite, s.idempotent(s.handleCreateBranch)))
+			r.Get("/connection-uri", s.requireScope(domain.ScopeRolesRead, s.handleConnectionURI))
 		})
 		r.Route("/branches/{br}", func(r chi.Router) {
 			r.Get("/", s.requireScope(domain.ScopeBranchesRead, s.handleGetBranch))
 			r.Patch("/", s.requireScope(domain.ScopeBranchesWrite, s.handleUpdateBranch))
 			r.Delete("/", s.requireScope(domain.ScopeBranchesWrite, s.handleDeleteBranch))
 			r.Get("/endpoints", s.requireScope(domain.ScopeEndpointsRead, s.handleListEndpoints))
+
+			r.Get("/roles", s.requireScope(domain.ScopeRolesRead, s.handleListDBRoles))
+			r.Post("/roles", s.requireScope(domain.ScopeRolesWrite, s.idempotent(s.handleCreateDBRole)))
+			r.Delete("/roles/{role}", s.requireScope(domain.ScopeRolesWrite, s.handleDeleteDBRole))
+			r.Post("/roles/{role}/reset-password", s.requireScope(domain.ScopeRolesWrite, s.handleResetDBRolePassword))
+
+			r.Get("/databases", s.requireScope(domain.ScopeRolesRead, s.handleListDatabases))
+			r.Post("/databases", s.requireScope(domain.ScopeRolesWrite, s.idempotent(s.handleCreateDatabase)))
+			r.Delete("/databases/{db}", s.requireScope(domain.ScopeRolesWrite, s.handleDeleteDatabase))
 		})
 	})
 }

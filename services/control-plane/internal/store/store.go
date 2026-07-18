@@ -57,11 +57,34 @@ type CreateAPIKeyParams struct {
 	CreatedBy *string
 }
 
+// SecretMaterial is prepared by the handler layer (which owns the keyring);
+// stores only ever see ciphertext.
+type SecretMaterial struct {
+	Ciphertext []byte
+	KeyVersion uint32
+}
+
+// ProjectSeed provisions the initial owner role + database records on the
+// default branch, atomically with project creation (DATABASE_ARCHITECTURE §8).
+type ProjectSeed struct {
+	RoleName     string
+	DatabaseName string
+	Secret       SecretMaterial
+}
+
 type CreateProjectParams struct {
 	OrgID     string
 	Name      string
 	Region    string
 	PGVersion int
+	Seed      *ProjectSeed
+}
+
+type CreateDBRoleParams struct {
+	OrgID    string
+	BranchID string
+	Name     string
+	Secret   SecretMaterial
 }
 
 type CreateBranchParams struct {
@@ -128,6 +151,18 @@ type Store interface {
 	UpdateBranch(ctx context.Context, orgID, branchID string, p UpdateBranchParams) (*domain.Branch, error)
 	SoftDeleteBranch(ctx context.Context, orgID, branchID string, at time.Time) error // ErrDefaultBranch for the default
 	ListEndpoints(ctx context.Context, orgID, branchID string) ([]domain.Endpoint, error)
+
+	CreateDBRole(ctx context.Context, p CreateDBRoleParams) (*domain.DBRole, error)
+	ListDBRoles(ctx context.Context, orgID, branchID string) ([]domain.DBRole, error)
+	DeleteDBRole(ctx context.Context, orgID, branchID, name string) error // ErrConflict if a database owner
+	ResetDBRolePassword(ctx context.Context, orgID, branchID, name string, secret SecretMaterial) error
+	// GetDBRoleSecret returns the role's password ciphertext for the audited
+	// connection-URI reveal path.
+	GetDBRoleSecret(ctx context.Context, orgID, branchID, name string) ([]byte, error)
+
+	CreateDatabase(ctx context.Context, orgID, branchID, name, ownerRoleName string) (*domain.Database, error)
+	ListDatabases(ctx context.Context, orgID, branchID string) ([]domain.Database, error)
+	DeleteDatabase(ctx context.Context, orgID, branchID, name string) error
 
 	AppendAudit(ctx context.Context, e domain.AuditEntry) error
 	ListAudit(ctx context.Context, orgID string, pg Page) ([]domain.AuditEntry, string, error)

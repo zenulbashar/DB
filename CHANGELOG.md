@@ -49,10 +49,29 @@ All notable changes to this repository. Format loosely follows [Keep a Changelog
   route ConfigMap contents) + store integration flow (work queue → ready → routable →
   teardown drained).
 
+### Added (2d: envelope secrets + role/database API, 2026-07-18)
+- `internal/secrets`: AES-256-GCM envelope encryption (per-secret DEK wrapped by versioned
+  KEK; keyring from `NDB_KEKS`/`NDB_ACTIVE_KEK`, rotation-ready; KMS replaces the keyring
+  without a blob-format change). URI-safe credential minting.
+- Migration `0003`: `secrets`, `db_roles`, `databases` tables under FORCE-RLS.
+- Project creation now seeds the default branch with `<name>_owner` role + database —
+  password returned exactly once (`ProjectCreated` response shape).
+- API: role CRUD + reset-password (password-once semantics), database CRUD
+  (owner-role delete protection), and `GET /projects/{prj}/connection-uri` — masked by
+  default, `?reveal=true` gated on `roles:write` and always audited. Reserved PG name
+  guardrails (`postgres`, `pg_*`, CNPG-internal roles).
+- Verified: secrets unit suite (roundtrip, tamper, wrong-key, rotation), handler suites,
+  Postgres integration (seed flow, secret rotation, RLS cross-org zero-leak on new tables),
+  plus a live end-to-end smoke: bootstrap → seeded project → masked URI → audited reveal
+  decrypting the exact creation-time password.
+- Test harness hardened: schema-level reset + catalog-derived truncation (no more stale
+  table lists as migrations land).
+
 ### Pending in Phase 2
 - WAL archiving/PITR wiring (barman-cloud object-store config on the Cluster spec) +
-  nightly restore-verification job; TLS cert issuance per endpoint; audit writes moved
-  into mutation transactions; live-cluster validation on a kind/staging environment
+  nightly restore-verification job; reconciler applying managed roles/databases to live
+  clusters (k8s Secrets + CNPG managed roles); TLS cert issuance per endpoint; audit
+  writes moved into mutation transactions; live-cluster validation on kind/staging
   (fake-client coverage only so far — this environment has no Docker daemon).
 
 ## [Phase 1] — 2026-07-17

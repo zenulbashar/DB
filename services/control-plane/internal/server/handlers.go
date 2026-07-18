@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/mail"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -335,8 +336,21 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, r, http.StatusBadRequest, "validation", "Validation failed", "pg_version must be 16 or 17.")
 		return
 	}
+	// Seed the default branch with an owner role + database so the project is
+	// connectable the moment the reconciler brings it up
+	// (DATABASE_ARCHITECTURE §8). The password is returned exactly once.
+	password, material, ok := s.sealPassword(w, r)
+	if !ok {
+		return
+	}
+	base := pgIdentifier(req.Name)
+	seed := &store.ProjectSeed{
+		RoleName:     base + "_owner",
+		DatabaseName: base,
+		Secret:       material,
+	}
 	prj, err := s.store.CreateProject(r.Context(), store.CreateProjectParams{
-		OrgID: req.OrgID, Name: req.Name, Region: req.Region, PGVersion: req.PGVersion,
+		OrgID: req.OrgID, Name: req.Name, Region: req.Region, PGVersion: req.PGVersion, Seed: seed,
 	})
 	if err != nil {
 		s.storeErr(w, r, err)
@@ -344,7 +358,38 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 	}
 	s.auditKey(r, req.OrgID, "project.create", "project", prj.ID,
 		map[string]any{"region": prj.Region, "pg_version": prj.PGVersion})
-	writeJSON(w, http.StatusCreated, prj)
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"project":    prj,
+		"owner_role": map[string]string{"name": seed.RoleName, "password": password},
+		"database":   map[string]string{"name": seed.DatabaseName},
+	})
+}
+
+// pgIdentifier derives a Postgres-identifier-safe base from a display name
+// (lowercase snake, length-bounded so "_owner" still fits).
+func pgIdentifier(name string) string {
+	var b []rune
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z' || r >= '0' && r <= '9':
+			b = append(b, r)
+		case r >= 'A' && r <= 'Z':
+			b = append(b, r+('a'-'A'))
+		default:
+			if len(b) > 0 && b[len(b)-1] != '_' {
+				b = append(b, '_')
+			}
+		}
+	}
+	out := strings.Trim(string(b), "_")
+	if out == "" || !(out[0] >= 'a' && out[0] <= 'z' || out[0] == '_') {
+		out = "app_" + out
+		out = strings.Trim(out, "_")
+	}
+	if len(out) > 56 {
+		out = strings.Trim(out[:56], "_")
+	}
+	return out
 }
 
 func (s *Server) projectFromPath(w http.ResponseWriter, r *http.Request) (string, string, bool) {

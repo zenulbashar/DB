@@ -12,6 +12,7 @@ import (
 	"context"
 	"net/url"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -40,12 +41,14 @@ func ensureAppRole(t *testing.T, ctx context.Context, adminURL string) string {
 	}
 	for _, q := range []string{
 		`GRANT CONNECT, TEMP ON DATABASE ` + pgIdent(dbName) + ` TO ndb_test`,
-		`GRANT ALL ON SCHEMA public TO ndb_test`,
 		// A previous run (possibly as another role) may have left objects the
-		// test role can't touch; start from a clean slate so migrations run
-		// as ndb_test and it owns everything (FORCE RLS applies to owners).
-		`DROP TABLE IF EXISTS schema_migrations, orgs, users, org_members,
-		     api_keys, projects, branches, endpoints, audit_log, idempotency_keys CASCADE`,
+		// test role can't touch; recreate the schema so migrations run as
+		// ndb_test and it owns everything (FORCE RLS applies to owners).
+		// Schema-level reset is migration-proof — no table list to maintain.
+		`DROP SCHEMA public CASCADE`,
+		`CREATE SCHEMA public`,
+		`GRANT ALL ON SCHEMA public TO ndb_test`,
+		`GRANT ALL ON SCHEMA public TO public`,
 	} {
 		if _, err := admin.Exec(ctx, q); err != nil {
 			t.Fatalf("%s: %v", q, err)
@@ -94,8 +97,31 @@ func testStore(t *testing.T) *Store {
 		t.Fatal(err)
 	}
 	// Reset state between tests (privileged: RLS would hide other orgs' rows).
+	// The table list is derived from the catalog so new migrations are
+	// covered automatically.
 	err = s.withPrivTx(ctx, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `TRUNCATE orgs, users, org_members, api_keys, projects, branches, endpoints, audit_log, idempotency_keys CASCADE`)
+		rows, err := tx.Query(ctx,
+			`SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'schema_migrations'`)
+		if err != nil {
+			return err
+		}
+		var tables []string
+		for rows.Next() {
+			var name string
+			if err := rows.Scan(&name); err != nil {
+				rows.Close()
+				return err
+			}
+			tables = append(tables, pgIdent(name))
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if len(tables) == 0 {
+			return nil
+		}
+		_, err = tx.Exec(ctx, `TRUNCATE `+strings.Join(tables, ", ")+` CASCADE`)
 		return err
 	})
 	if err != nil {
@@ -380,6 +406,76 @@ func TestReconcilerStoreFlow(t *testing.T) {
 	}
 	if work, _ = s.ListReconcileWork(ctx); len(work) != 0 {
 		t.Fatalf("work queue not drained: %+v", work)
+	}
+}
+
+func TestRolesSecretsFlowAndRLS(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	res := bootstrapOrg(t, s, "acme")
+
+	seed := &store.ProjectSeed{
+		RoleName: "app_owner", DatabaseName: "app",
+		Secret: store.SecretMaterial{Ciphertext: []byte("sealed-1"), KeyVersion: 1},
+	}
+	pr, err := s.CreateProject(ctx, store.CreateProjectParams{
+		OrgID: res.Org.ID, Name: "App", Region: "syd1", PGVersion: 17, Seed: seed,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	brID := *pr.DefaultBranchID
+
+	// Seeded role + database exist; secret ciphertext round-trips.
+	roles, err := s.ListDBRoles(ctx, res.Org.ID, brID)
+	if err != nil || len(roles) != 1 || roles[0].Name != "app_owner" {
+		t.Fatalf("roles = %+v (%v)", roles, err)
+	}
+	ct, err := s.GetDBRoleSecret(ctx, res.Org.ID, brID, "app_owner")
+	if err != nil || string(ct) != "sealed-1" {
+		t.Fatalf("secret = %q (%v)", ct, err)
+	}
+
+	// Reset replaces ciphertext.
+	if err := s.ResetDBRolePassword(ctx, res.Org.ID, brID, "app_owner",
+		store.SecretMaterial{Ciphertext: []byte("sealed-2"), KeyVersion: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if ct, _ = s.GetDBRoleSecret(ctx, res.Org.ID, brID, "app_owner"); string(ct) != "sealed-2" {
+		t.Fatalf("secret after reset = %q", ct)
+	}
+
+	// Owner-of-database deletion protection.
+	if err := s.DeleteDBRole(ctx, res.Org.ID, brID, "app_owner"); err != store.ErrConflict {
+		t.Fatalf("delete owning role err = %v, want ErrConflict", err)
+	}
+
+	// RLS: a foreign org context sees no secrets/roles even unscoped.
+	otherOrg := ids.New(ids.Org)
+	err = s.withPrivTx(ctx, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `INSERT INTO orgs (id, name, slug) VALUES ($1, 'Other', 'other-sec')`, otherOrg)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var leakedSecrets, leakedRoles int
+	err = s.withOrgTx(ctx, otherOrg, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM secrets`).Scan(&leakedSecrets); err != nil {
+			return err
+		}
+		return tx.QueryRow(ctx, `SELECT count(*) FROM db_roles`).Scan(&leakedRoles)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if leakedSecrets != 0 || leakedRoles != 0 {
+		t.Fatalf("RLS leak: %d secrets, %d roles visible cross-org", leakedSecrets, leakedRoles)
+	}
+
+	// Cross-org access via the API paths is a 404-shaped ErrNotFound.
+	if _, err := s.GetDBRoleSecret(ctx, otherOrg, brID, "app_owner"); err != store.ErrNotFound {
+		t.Fatalf("cross-org secret read err = %v, want ErrNotFound", err)
 	}
 }
 

@@ -389,9 +389,22 @@ func (s *Store) CreateProject(ctx context.Context, p store.CreateProjectParams) 
 			return err
 		}
 		pr.DefaultBranchID = &b.ID
-		_, err = tx.Exec(ctx,
-			`UPDATE projects SET default_branch_id = $2 WHERE id = $1`, pr.ID, b.ID)
-		return err
+		if _, err := tx.Exec(ctx,
+			`UPDATE projects SET default_branch_id = $2 WHERE id = $1`, pr.ID, b.ID); err != nil {
+			return err
+		}
+		if p.Seed != nil {
+			role, err := createDBRoleTx(ctx, tx, store.CreateDBRoleParams{
+				OrgID: p.OrgID, BranchID: b.ID, Name: p.Seed.RoleName, Secret: p.Seed.Secret,
+			})
+			if err != nil {
+				return err
+			}
+			if _, err := createDatabaseTx(ctx, tx, p.OrgID, b.ID, p.Seed.DatabaseName, role.Name); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 	base := slug.Make(p.Name)
 

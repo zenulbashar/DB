@@ -12,6 +12,8 @@ type Config struct {
 	BootstrapToken string
 	Env            string // dev|staging|prod
 	Version        string
+	KEKs           string // NDB_KEKS keyring spec, "1:<base64>,…" (SECURITY_MODEL §5)
+	ActiveKEK      string
 }
 
 func Load() (Config, error) {
@@ -21,6 +23,8 @@ func Load() (Config, error) {
 		BootstrapToken: os.Getenv("NDB_BOOTSTRAP_TOKEN"),
 		Env:            getenv("NDB_ENV", "dev"),
 		Version:        getenv("NDB_VERSION", "dev"),
+		KEKs:           os.Getenv("NDB_KEKS"),
+		ActiveKEK:      os.Getenv("NDB_ACTIVE_KEK"),
 	}
 	if c.DatabaseURL == "" {
 		return c, fmt.Errorf("DATABASE_URL is required")

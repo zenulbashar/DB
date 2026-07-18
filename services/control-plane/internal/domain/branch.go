@@ -59,6 +59,24 @@ const (
 	EndpointROPooled EndpointKind = "ro_pooled"
 )
 
+type DBRole struct {
+	ID        string    `json:"id"`
+	BranchID  string    `json:"branch_id"`
+	OrgID     string    `json:"-"`
+	Name      string    `json:"name"`
+	SecretID  string    `json:"-"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type Database struct {
+	ID          string    `json:"id"`
+	BranchID    string    `json:"branch_id"`
+	OrgID       string    `json:"-"`
+	Name        string    `json:"name"`
+	OwnerRoleID string    `json:"owner_role_id"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
 type Endpoint struct {
 	ID        string        `json:"id"`
 	BranchID  string        `json:"branch_id"`

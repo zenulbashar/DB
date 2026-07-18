@@ -232,6 +232,32 @@ export interface paths {
         patch: operations["updateProject"];
         trace?: never;
     };
+    "/projects/{prj}/connection-uri": {
+        parameters: {
+            query?: {
+                branch?: string;
+                endpoint?: "rw_pooled" | "rw_direct" | "ro_pooled";
+                role?: string;
+                database?: string;
+                /** @description Requires `roles:write`; every reveal is audit-logged. */
+                reveal?: boolean;
+            };
+            header?: never;
+            path: {
+                prj: string;
+            };
+            cookie?: never;
+        };
+        /** Assemble a connection string (masked by default) */
+        get: operations["getConnectionUri"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{prj}/branches": {
         parameters: {
             query?: never;
@@ -276,6 +302,106 @@ export interface paths {
         head?: never;
         /** Update branch settings */
         patch: operations["updateBranch"];
+        trace?: never;
+    };
+    "/branches/{br}/roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                br: string;
+            };
+            cookie?: never;
+        };
+        /** List database roles */
+        get: operations["listDbRoles"];
+        put?: never;
+        /** Create a database role */
+        post: operations["createDbRole"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/branches/{br}/roles/{role}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                br: string;
+                role: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete a database role */
+        delete: operations["deleteDbRole"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/branches/{br}/roles/{role}/reset-password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                br: string;
+                role: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reset a role's password */
+        post: operations["resetDbRolePassword"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/branches/{br}/databases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                br: string;
+            };
+            cookie?: never;
+        };
+        /** List databases */
+        get: operations["listDatabases"];
+        put?: never;
+        /** Create a database */
+        post: operations["createDatabase"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/branches/{br}/databases/{db}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                br: string;
+                db: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete a database */
+        delete: operations["deleteDatabase"];
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/branches/{br}/endpoints": {
@@ -405,6 +531,36 @@ export interface components {
             state: components["schemas"]["ResourceState"];
             /** Format: date-time */
             created_at: string;
+        };
+        DBRole: {
+            id: string;
+            branch_id: string;
+            name: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        DBRoleWithPassword: components["schemas"]["DBRole"] & {
+            /** @description Returned exactly once; store it now. */
+            password: string;
+        };
+        Database: {
+            id: string;
+            branch_id: string;
+            name: string;
+            owner_role_id: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        ProjectCreated: {
+            project: components["schemas"]["Project"];
+            owner_role: {
+                name: string;
+                /** @description Returned exactly once. */
+                password: string;
+            };
+            database: {
+                name: string;
+            };
         };
         AuditEntry: {
             id: string;
@@ -883,13 +1039,16 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Created project record */
+            /**
+             * @description Created project with its seeded owner role and database on the
+             *     default branch. The role password is returned exactly once.
+             */
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Project"];
+                    "application/json": components["schemas"]["ProjectCreated"];
                 };
             };
             409: components["responses"]["Problem"];
@@ -965,6 +1124,45 @@ export interface operations {
                     "application/json": components["schemas"]["Project"];
                 };
             };
+        };
+    };
+    getConnectionUri: {
+        parameters: {
+            query?: {
+                branch?: string;
+                endpoint?: "rw_pooled" | "rw_direct" | "ro_pooled";
+                role?: string;
+                database?: string;
+                /** @description Requires `roles:write`; every reveal is audit-logged. */
+                reveal?: boolean;
+            };
+            header?: never;
+            path: {
+                prj: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Connection URI (never cached) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        uri: string;
+                        endpoint: string;
+                        branch_id: string;
+                        role: string;
+                        database: string;
+                        revealed: boolean;
+                    };
+                };
+            };
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
         };
     };
     listBranches: {
@@ -1116,6 +1314,197 @@ export interface operations {
             };
             404: components["responses"]["Problem"];
             409: components["responses"]["Problem"];
+        };
+    };
+    listDbRoles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                br: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Roles (never includes secret material) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["DBRole"][];
+                    };
+                };
+            };
+            404: components["responses"]["Problem"];
+        };
+    };
+    createDbRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                br: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Created role — password shown exactly once */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DBRoleWithPassword"];
+                };
+            };
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+        };
+    };
+    deleteDbRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                br: string;
+                role: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Problem"];
+            /** @description Role owns a database */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    resetDbRolePassword: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                br: string;
+                role: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description New password — shown exactly once */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        name: string;
+                        password: string;
+                    };
+                };
+            };
+            404: components["responses"]["Problem"];
+        };
+    };
+    listDatabases: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                br: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Databases */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["Database"][];
+                    };
+                };
+            };
+            404: components["responses"]["Problem"];
+        };
+    };
+    createDatabase: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                br: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    owner_role: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Created database */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Database"];
+                };
+            };
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+        };
+    };
+    deleteDatabase: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                br: string;
+                db: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Problem"];
         };
     };
     listEndpoints: {

@@ -2,6 +2,8 @@ package server_test
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,16 +12,30 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/zenulbashar/DB/services/control-plane/internal/secrets"
 	"github.com/zenulbashar/DB/services/control-plane/internal/server"
 	"github.com/zenulbashar/DB/services/control-plane/internal/store/memory"
 )
 
 const bootToken = "test-bootstrap-token"
 
+func testKeyring(t *testing.T) *secrets.Keyring {
+	t.Helper()
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		t.Fatal(err)
+	}
+	kr, err := secrets.ParseKeyring("1:"+base64.StdEncoding.EncodeToString(key), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return kr
+}
+
 func newTestServer(t *testing.T) http.Handler {
 	t.Helper()
 	return server.New(memory.New(),
-		server.Config{BootstrapToken: bootToken, Version: "test"},
+		server.Config{BootstrapToken: bootToken, Version: "test", Keyring: testKeyring(t)},
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
 }
 
@@ -162,25 +178,41 @@ func TestProjectLifecycleAndAudit(t *testing.T) {
 	if status != http.StatusCreated {
 		t.Fatalf("create project = %d %s", status, body)
 	}
-	var prj struct {
-		ID        string `json:"id"`
-		Slug      string `json:"slug"`
-		Region    string `json:"region"`
-		PGVersion int    `json:"pg_version"`
-		State     string `json:"state"`
+	var created struct {
+		Project struct {
+			ID        string `json:"id"`
+			Slug      string `json:"slug"`
+			Region    string `json:"region"`
+			PGVersion int    `json:"pg_version"`
+			State     string `json:"state"`
+		} `json:"project"`
+		OwnerRole struct {
+			Name     string `json:"name"`
+			Password string `json:"password"`
+		} `json:"owner_role"`
+		Database struct {
+			Name string `json:"name"`
+		} `json:"database"`
 	}
-	mustUnmarshal(t, body, &prj)
+	mustUnmarshal(t, body, &created)
+	prj := created.Project
 	if prj.Slug != "prompt2eat" || prj.Region != "syd1" || prj.PGVersion != 17 || prj.State != "pending" {
 		t.Fatalf("unexpected project defaults: %+v", prj)
 	}
+	if created.OwnerRole.Name != "prompt2eat_owner" || created.OwnerRole.Password == "" ||
+		created.Database.Name != "prompt2eat" {
+		t.Fatalf("unexpected seed credentials: %+v", created)
+	}
 
 	// Slug collision gets a suffix.
-	_, body = do(t, e.h, "POST", "/v1/projects", e.token, map[string]any{"name": "Prompt2Eat"}, nil)
-	var prj2 struct {
-		Slug string `json:"slug"`
+	_, body = do(t, e.h, "POST", "/v1/projects", e.token, map[string]any{"name": "Prompt2Eat X"}, nil)
+	var second struct {
+		Project struct {
+			Slug string `json:"slug"`
+		} `json:"project"`
 	}
-	mustUnmarshal(t, body, &prj2)
-	if prj2.Slug == prj.Slug {
+	mustUnmarshal(t, body, &second)
+	if second.Project.Slug == prj.Slug {
 		t.Fatalf("second project reused slug %q", prj.Slug)
 	}
 

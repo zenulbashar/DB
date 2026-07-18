@@ -7,9 +7,14 @@
 dev-db: ## Start local control-plane Postgres (docker compose)
 	docker compose up -d postgres
 
+# Dev-only KEK (base64 of 32 zero bytes is NOT used — this is a fixed random
+# dev key; production keys come from KMS/secret store, never from a Makefile).
+DEV_KEK := 1:XBMsCi/pCq8xMYM9KP0xSjO/O8sB9oYLFqOUoHy+E10=
+
 dev: dev-db migrate ## Run the control-plane API against local Postgres
 	cd services/control-plane && DATABASE_URL=$${DATABASE_URL:-postgres://ndb_app:ndb_app@localhost:5433/nimbusdb_cp?sslmode=disable} \
 		NDB_BOOTSTRAP_TOKEN=$${NDB_BOOTSTRAP_TOKEN:-dev-bootstrap-token} \
+		NDB_KEKS=$${NDB_KEKS:-$(DEV_KEK)} \
 		go run ./cmd/api
 
 migrate: ## Apply control-plane migrations
