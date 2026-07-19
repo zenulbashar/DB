@@ -1,6 +1,6 @@
 # NimbusDB monorepo entry points. Each target delegates into the owning package.
 
-.PHONY: dev dev-db migrate api test test-integration lint build console-dev console-build generate openapi-lint
+.PHONY: dev dev-db migrate api test test-integration lint build console-dev console-build generate openapi-lint smoke
 
 ## Local development ---------------------------------------------------------
 
@@ -23,6 +23,9 @@ migrate: ## Apply control-plane migrations
 
 console-dev:
 	cd console && npm run dev
+
+smoke: ## End-to-end smoke test: console renders live control-plane data (needs a FRESH DATABASE_URL)
+	tools/smoke-e2e.sh
 
 ## Quality gates --------------------------------------------------------------
 
