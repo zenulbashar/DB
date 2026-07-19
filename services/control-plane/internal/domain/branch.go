@@ -33,8 +33,12 @@ const (
 	StateSuspending ResourceState = "suspending"
 	StateSuspended  ResourceState = "suspended"
 	StateResuming   ResourceState = "resuming"
-	StateError      ResourceState = "error"
-	StateDeleting   ResourceState = "deleting"
+	// StateResizing is a vertical resize in flight: the reconciler re-applies
+	// the cluster at the new current_cu, then flips back to ready (ROADMAP
+	// Phase 4 — zero-downtime resize between CU bounds).
+	StateResizing ResourceState = "resizing"
+	StateError    ResourceState = "error"
+	StateDeleting ResourceState = "deleting"
 )
 
 // resourceTransitions is the compute-lifecycle state machine shared by branches
@@ -44,10 +48,11 @@ const (
 // no central transition validator before (unlike imports); this adds one as
 // defence-in-depth over the store's guarded SQL predicates.
 var resourceTransitions = map[ResourceState][]ResourceState{
-	StateReady:      {StateSuspending},
+	StateReady:      {StateSuspending, StateResizing},
 	StateSuspending: {StateSuspended, StateError},
 	StateSuspended:  {StateResuming},
 	StateResuming:   {StateReady, StateError},
+	StateResizing:   {StateReady, StateError},
 }
 
 // CanTransitionResource reports whether from → to is a legal scale-to-zero
@@ -64,9 +69,22 @@ func CanTransitionResource(from, to ResourceState) bool {
 }
 
 type Compute struct {
-	MinCU           float64 `json:"min_cu"`
-	MaxCU           float64 `json:"max_cu"`
+	MinCU float64 `json:"min_cu"`
+	MaxCU float64 `json:"max_cu"`
+	// CurrentCU is the actual running size the reconciler applies to the
+	// cluster, autoscaled between MinCU and MaxCU (ROADMAP Phase 4). Zero means
+	// "not yet sized" — the reconciler falls back to MinCU.
+	CurrentCU       float64 `json:"current_cu"`
 	SuspendTimeoutS int     `json:"suspend_timeout_s"`
+}
+
+// EffectiveCU is the CU the reconciler sizes the cluster to (CurrentCU, or MinCU
+// before the first resize).
+func (c Compute) EffectiveCU() float64 {
+	if c.CurrentCU > 0 {
+		return c.CurrentCU
+	}
+	return c.MinCU
 }
 
 type Branch struct {

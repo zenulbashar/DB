@@ -351,6 +351,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/branches/{br}/resize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                br: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Vertically resize a branch's compute
+         * @description Sets the branch's running compute size (`current_cu`), clamped to its `min_cu`/`max_cu` bounds, and flips it `ready → resizing`; the reconciler re-applies the cluster at the new size (zero-downtime, replica-first on HA) and flips it back to `ready`. This is also the action a metrics-driven autoscaler drives. 409 if the branch is not in a resizable state.
+         */
+        post: operations["resizeBranch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{prj}/imports": {
         parameters: {
             query?: never;
@@ -661,6 +683,8 @@ export interface components {
         Compute: {
             min_cu: number;
             max_cu: number;
+            /** @description Actual running size, autoscaled between min_cu and max_cu (0 before the first resize). */
+            current_cu?: number;
             suspend_timeout_s: number;
         };
         Branch: {
@@ -1545,6 +1569,36 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description Branch (now resuming or already ready) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Branch"];
+                };
+            };
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+        };
+    };
+    resizeBranch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                br: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    cu: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Branch (now resizing or already at size) */
             200: {
                 headers: {
                     [name: string]: unknown;

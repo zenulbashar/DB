@@ -253,8 +253,11 @@ func BuildCluster(w postgres.BranchWork, backup *BackupConfig) *unstructured.Uns
 	if hasReadEndpoint(w) && instances < 2 {
 		instances = 2
 	}
-	cpuMilli := int(w.Branch.Compute.MinCU * 1000)
-	memMi := int(w.Branch.Compute.MinCU * 4096)
+	// Sized from the branch's CURRENT CU (autoscaled between min/max), not min —
+	// a vertical resize re-applies this at the new size (ROADMAP Phase 4).
+	cu := w.Branch.Compute.EffectiveCU()
+	cpuMilli := int(cu * 1000)
+	memMi := int(cu * 4096)
 	res := map[string]any{
 		"cpu":    fmt.Sprintf("%dm", cpuMilli),
 		"memory": fmt.Sprintf("%dMi", memMi),

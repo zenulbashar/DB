@@ -32,11 +32,11 @@ func (s *Store) ListReconcileWork(ctx context.Context) ([]BranchWork, error) {
 	err := s.withPrivTx(ctx, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
 			SELECT b.id, b.project_id, b.org_id, b.parent_id, b.name, b.role, b.state,
-			       b.compute_min_cu, b.compute_max_cu, b.suspend_timeout_s, b.retention_days,
+			       b.compute_min_cu, b.compute_max_cu, COALESCE(b.current_cu, 0), b.suspend_timeout_s, b.retention_days,
 			       b.bootstrap_at, b.created_at,
 			       p.region, p.pg_version
 			  FROM branches b JOIN projects p ON p.id = b.project_id
-			 WHERE b.state IN ('provisioning','deleting','suspending','resuming')
+			 WHERE b.state IN ('provisioning','deleting','suspending','resuming','resizing')
 			    OR (b.state = 'ready'
 			        AND EXISTS (SELECT 1 FROM endpoints e
 			                     WHERE e.branch_id = b.id AND e.state = 'provisioning'))
@@ -49,7 +49,7 @@ func (s *Store) ListReconcileWork(ctx context.Context) ([]BranchWork, error) {
 			var w BranchWork
 			b := &w.Branch
 			if err := rows.Scan(&b.ID, &b.ProjectID, &b.OrgID, &b.ParentID, &b.Name, &b.Role, &b.State,
-				&b.Compute.MinCU, &b.Compute.MaxCU, &b.Compute.SuspendTimeoutS, &b.RetentionDays,
+				&b.Compute.MinCU, &b.Compute.MaxCU, &b.Compute.CurrentCU, &b.Compute.SuspendTimeoutS, &b.RetentionDays,
 				&b.BootstrapAt, &b.CreatedAt,
 				&w.Region, &w.PGVersion); err != nil {
 				return err
@@ -100,6 +100,17 @@ func (s *Store) MarkBranchSuspended(ctx context.Context, branchID string) error 
 // once the compute is un-hibernated and healthy.
 func (s *Store) MarkBranchResumed(ctx context.Context, branchID string) error {
 	return s.markBranchComputeState(ctx, branchID, "resuming", "ready")
+}
+
+// MarkBranchResized flips a resizing branch back to ready once the reconciler
+// has applied the new compute size. Endpoints are untouched (a resize never
+// changes routing; they stay ready throughout).
+func (s *Store) MarkBranchResized(ctx context.Context, branchID string) error {
+	return s.withPrivTx(ctx, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx,
+			`UPDATE branches SET state = 'ready' WHERE id = $1 AND state = 'resizing'`, branchID)
+		return err
+	})
 }
 
 // MarkEndpointsReady flips a branch's newly-provisioned endpoints (an added
@@ -302,7 +313,7 @@ func (s *Store) ListRoutableEndpoints(ctx context.Context) ([]RoutableEndpoint, 
 			SELECT e.id, e.branch_id, b.project_id, e.kind, e.state, b.compute_max_cu
 			  FROM endpoints e JOIN branches b ON b.id = e.branch_id
 			 WHERE e.state IN ('ready','suspending','suspended','resuming')
-			   AND b.state IN ('ready','suspending','suspended','resuming')
+			   AND b.state IN ('ready','suspending','suspended','resuming','resizing')
 			 ORDER BY e.id`)
 		if err != nil {
 			return err

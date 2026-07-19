@@ -106,6 +106,7 @@ func (s *Server) routes() {
 			r.Delete("/", s.requireScope(domain.ScopeBranchesWrite, s.handleDeleteBranch))
 			r.Post("/suspend", s.requireScope(domain.ScopeBranchesWrite, s.handleSuspendBranch))
 			r.Post("/resume", s.requireScope(domain.ScopeBranchesWrite, s.handleResumeBranch))
+			r.Post("/resize", s.requireScope(domain.ScopeBranchesWrite, s.handleResizeBranch))
 			r.Get("/endpoints", s.requireScope(domain.ScopeEndpointsRead, s.handleListEndpoints))
 			r.Post("/endpoints", s.requireScope(domain.ScopeBranchesWrite, s.idempotent(s.handleCreateEndpoint)))
 

@@ -616,6 +616,40 @@ paths:
         "404": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
 
+  /branches/{br}/resize:
+    parameters:
+      - name: br
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [branches]
+      operationId: resizeBranch
+      summary: Vertically resize a branch's compute
+      description: >
+        Sets the branch's running compute size (`current_cu`), clamped to its
+        `min_cu`/`max_cu` bounds, and flips it `ready → resizing`; the reconciler
+        re-applies the cluster at the new size (zero-downtime, replica-first on
+        HA) and flips it back to `ready`. This is also the action a metrics-driven
+        autoscaler drives. 409 if the branch is not in a resizable state.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                cu: { type: number, minimum: 0.25, maximum: 8 }
+              required: [cu]
+      responses:
+        "200":
+          description: Branch (now resizing or already at size)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Branch" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+
   /projects/{prj}/imports:
     parameters:
       - name: prj
@@ -1140,6 +1174,7 @@ components:
       properties:
         min_cu: { type: number }
         max_cu: { type: number }
+        current_cu: { type: number, description: "Actual running size, autoscaled between min_cu and max_cu (0 before the first resize)." }
         suspend_timeout_s: { type: integer }
       required: [min_cu, max_cu, suspend_timeout_s]
 

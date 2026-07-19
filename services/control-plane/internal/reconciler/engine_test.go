@@ -25,6 +25,7 @@ type fakeSource struct {
 	suspended      []string
 	resumed        []string
 	endpointsReady []string
+	resized        []string
 	tornDown       []string
 	sweptIdle      []string
 	liveCount      map[string]int
@@ -47,6 +48,10 @@ func (f *fakeSource) MarkBranchResumed(_ context.Context, id string) error {
 }
 func (f *fakeSource) MarkEndpointsReady(_ context.Context, id string) error {
 	f.endpointsReady = append(f.endpointsReady, id)
+	return nil
+}
+func (f *fakeSource) MarkBranchResized(_ context.Context, id string) error {
+	f.resized = append(f.resized, id)
 	return nil
 }
 func (f *fakeSource) FinishBranchTeardown(_ context.Context, id string) error {

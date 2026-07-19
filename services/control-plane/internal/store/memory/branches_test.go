@@ -137,6 +137,35 @@ func TestWakeBranchByID(t *testing.T) {
 	}
 }
 
+func TestResizeBranchMemory(t *testing.T) {
+	s := New()
+	ctx := context.Background()
+	seedReadyBranch(s, "org_1", "br_1") // MinCU 0.25, MaxCU 2
+
+	b, err := s.ResizeBranch(ctx, "org_1", "br_1", 1.5)
+	if err != nil {
+		t.Fatalf("resize: %v", err)
+	}
+	if b.State != domain.StateResizing || b.Compute.CurrentCU != 1.5 {
+		t.Fatalf("state=%s current_cu=%v, want resizing/1.5", b.State, b.Compute.CurrentCU)
+	}
+	// Coalesce a new target while resizing; above max clamps to 2.
+	b, err = s.ResizeBranch(ctx, "org_1", "br_1", 99)
+	if err != nil {
+		t.Fatalf("coalesce resize: %v", err)
+	}
+	if b.Compute.CurrentCU != 2 {
+		t.Fatalf("current_cu = %v, want 2 (clamped to max)", b.Compute.CurrentCU)
+	}
+	// Missing branch → 404; cross-org → 404.
+	if _, err := s.ResizeBranch(ctx, "org_1", "br_missing", 1); err != store.ErrNotFound {
+		t.Fatalf("resize missing = %v, want not found", err)
+	}
+	if _, err := s.ResizeBranch(ctx, "org_other", "br_1", 1); err != store.ErrNotFound {
+		t.Fatalf("cross-org resize = %v, want not found", err)
+	}
+}
+
 func TestSuspendResumeGuards(t *testing.T) {
 	s := New()
 	ctx := context.Background()

@@ -27,6 +27,9 @@ type Source interface {
 	// MarkEndpointsReady flips a ready branch's newly-provisioned endpoints
 	// (e.g. an added read endpoint) to ready.
 	MarkEndpointsReady(ctx context.Context, branchID string) error
+	// MarkBranchResized flips a resizing branch back to ready once its cluster
+	// has been re-applied at the new compute size.
+	MarkBranchResized(ctx context.Context, branchID string) error
 	FinishBranchTeardown(ctx context.Context, branchID string) error
 	CountLiveBranches(ctx context.Context, projectID string) (int, error)
 	ListRoutableEndpoints(ctx context.Context) ([]postgres.RoutableEndpoint, error)
@@ -102,6 +105,8 @@ func (e *Engine) ReconcileOnce(ctx context.Context) error {
 			// A ready branch is work only when it has a newly-added endpoint to
 			// provision (widened ListReconcileWork) — e.g. a read endpoint.
 			keep(e.reconcileEndpoints(ctx, w))
+		case domain.StateResizing:
+			keep(e.resizeCompute(ctx, w))
 		}
 	}
 	keep(e.publishRoutes(ctx))
@@ -229,6 +234,33 @@ func (e *Engine) reconcileEndpoints(ctx context.Context, w postgres.BranchWork) 
 			return err
 		}
 		e.log.Info("branch endpoints ready", "branch", w.Branch.ID, "project", w.ProjectID)
+	}
+	return nil
+}
+
+// resizeCompute re-applies a branch's cluster at its new current_cu and, once
+// the cluster is healthy at the new size, flips it back to ready (ROADMAP Phase
+// 4 — zero-downtime vertical resize; CNPG does the replica-first rollout).
+// Non-disruptive to routing: endpoints and the route table are untouched.
+func (e *Engine) resizeCompute(ctx context.Context, w postgres.BranchWork) error {
+	objs := []*unstructured.Unstructured{e.clusterFor(w), BuildPooler(w)}
+	if hasReadEndpoint(w) {
+		objs = append(objs, BuildROPooler(w))
+	}
+	for _, o := range objs {
+		if err := e.ensure(ctx, o); err != nil {
+			return fmt.Errorf("ensure %s/%s: %w", o.GetKind(), o.GetName(), err)
+		}
+	}
+	ready, err := e.clusterReady(ctx, w)
+	if err != nil {
+		return err
+	}
+	if ready {
+		if err := e.src.MarkBranchResized(ctx, w.Branch.ID); err != nil {
+			return err
+		}
+		e.log.Info("branch resized", "branch", w.Branch.ID, "cu", w.Branch.Compute.EffectiveCU())
 	}
 	return nil
 }

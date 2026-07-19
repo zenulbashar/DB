@@ -10,6 +10,9 @@ func TestCanTransitionResource(t *testing.T) {
 		{StateSuspended, StateResuming},
 		{StateResuming, StateReady},
 		{StateResuming, StateError},
+		{StateReady, StateResizing},
+		{StateResizing, StateReady},
+		{StateResizing, StateError},
 	}
 	for _, e := range legal {
 		if !CanTransitionResource(e[0], e[1]) {
