@@ -2,6 +2,26 @@
 
 All notable changes to this repository. Format loosely follows [Keep a Changelog](https://keepachangelog.com/); one entry per phase gate plus notable intermediate merges.
 
+## [Phase 3 — console: project creation + one-time credential reveal] — 2026-07-19
+
+Projects can now be created from the console — the last piece needed to go from zero to a
+connectable database entirely in the UI.
+
+### Added
+- **New project flow** (`/projects/new`) — org selector (from `GET /orgs`), name, region, and PG
+  version; `POST /projects`. A **New project** button anchors the dashboard header.
+- **One-time credential reveal** — the create response returns the seeded owner role's password
+  *exactly once* (per the API contract). The form swaps to a credentials panel (database, owner
+  role, password) with copy buttons and a "shown exactly once" warning; the password lives only in
+  the client component's state for that page view — never persisted to a cookie, URL, or storage —
+  then links to the new project. Lose it → reset via the role API, not re-fetch.
+- **`ButtonLink`** primitive — a `Link` styled as a button (shared base classes with `Button`),
+  so link-actions don't nest `<button>` in `<a>`.
+
+### Verification
+- `tsc --noEmit` and `next build` clean (`/projects/new` route added). Boot check: `/projects/new`
+  307-redirects to `/connect` without a session.
+
 ## [Phase 3 — console: branch management (first write surface)] — 2026-07-19
 
 The console stops being read-only: branches can now be created and driven through their

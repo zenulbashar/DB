@@ -4,6 +4,7 @@ import { getToken } from "@/lib/session";
 import { serverClient, friendlyError, type Project } from "@/lib/api";
 import {
   Badge,
+  ButtonLink,
   EmptyState,
   ErrorNote,
   StatusDot,
@@ -41,7 +42,12 @@ export default async function Home() {
             Serverless PostgreSQL on the Nimbus platform.
           </p>
         </div>
-        <Badge>{projects.length}</Badge>
+        <div className="flex items-center gap-3">
+          <Badge>{projects.length}</Badge>
+          <ButtonLink href="/projects/new" size="sm">
+            New project
+          </ButtonLink>
+        </div>
       </div>
 
       {error && <ErrorNote>{error}</ErrorNote>}
