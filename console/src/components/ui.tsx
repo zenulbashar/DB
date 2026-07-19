@@ -63,26 +63,53 @@ export function Card({
 export type ResourceState =
   | "provisioning"
   | "ready"
+  | "suspending"
   | "suspended"
+  | "resuming"
+  | "resizing"
   | "error"
   | "deleting";
 
+// Transitional states reuse the settled color they're heading to/from; the ones
+// that are actively converging pulse (DESIGN_SYSTEM_MAPPING §2).
 const stateColors: Record<ResourceState, string> = {
   provisioning: "bg-state-provisioning",
   ready: "bg-state-ready",
+  suspending: "bg-state-suspended",
   suspended: "bg-state-suspended",
+  resuming: "bg-state-provisioning",
+  resizing: "bg-state-provisioning",
   error: "bg-state-error",
   deleting: "bg-state-deleting",
 };
+
+const pulsing = new Set<ResourceState>(["provisioning", "suspending", "resuming", "resizing", "deleting"]);
 
 export function StatusDot({ state }: { state: ResourceState }) {
   return (
     <span
       aria-label={state}
-      className={`inline-block size-2 rounded-pill ${stateColors[state]} ${
-        state === "provisioning" ? "animate-pulse" : ""
+      className={`inline-block size-2 rounded-pill ${stateColors[state] ?? "bg-state-error"} ${
+        pulsing.has(state) ? "animate-pulse" : ""
       }`}
     />
+  );
+}
+
+export function EmptyState({ title, hint }: { title: string; hint?: string }) {
+  return (
+    <div className="rounded-card border border-dashed border-edge px-6 py-10 text-center">
+      <p className="text-sm font-medium">{title}</p>
+      {hint && <p className="mt-1 text-sm text-fg-muted">{hint}</p>}
+    </div>
+  );
+}
+
+export function ErrorNote({ children }: { children: ReactNode }) {
+  return (
+    <div className="rounded-control border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger" role="alert">
+      {children}
+    </div>
   );
 }
 
