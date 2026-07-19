@@ -89,13 +89,16 @@ token-isolated so a re-skin is contained in the token layer and primitive styles
 
 ## 6. Implementation status (updated per increment)
 
-Built and live-wired (console read surface):
+Built and live-wired (console read surface + branch write actions):
 - **Primitives:** `Button` (with `loading`), `Card`, `Badge`, `StatusDot` (all 8 lifecycle states;
   transitional states pulse), `Spinner`, `EmptyState`, `ErrorNote`, `ConnectionString` (masking),
-  `CopyField` (mono value + one-click copy, the CodeBlock/ConnectionString §3 gap's first slice).
+  `CopyField` (mono value + one-click copy, the CodeBlock/ConnectionString §3 gap's first slice),
+  and form controls `Input` / `Select` / `Field` (the form-control §3 gap's first slice).
 - **Screens:** connect (§4 auth), projects dashboard, project overview (branch list + endpoints +
-  connection panel).
+  connection panel) with **branch create + suspend/resume/resize** actions (server actions +
+  client controls, state-driven).
 
 Not yet built (later Phase 3 slices): `DataTable`, `Modal/Drawer`, `Toast`, `Tabs`, `Tooltip`,
-`Textarea`/`Combobox`, skeleton loaders, charts, the SQL editor, and the metrics/audit/role/API-key
-management screens. The token layer and re-skin isolation (§5) are unchanged by this slice.
+`Textarea`/`Combobox`, skeleton loaders, charts, the SQL editor, project-create (one-time
+credential UX), and the metrics/audit/role/API-key management screens. The token layer and re-skin
+isolation (§5) are unchanged by these slices.

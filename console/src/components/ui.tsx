@@ -113,6 +113,42 @@ export function ErrorNote({ children }: { children: ReactNode }) {
   );
 }
 
+const fieldBase =
+  "w-full rounded-control border border-edge-strong bg-surface px-3 py-2 text-sm text-fg outline-none transition-colors focus:border-accent disabled:opacity-50";
+
+export function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
+  return <input {...props} className={`${fieldBase} ${props.className ?? ""}`} />;
+}
+
+export function Select({
+  children,
+  ...props
+}: React.SelectHTMLAttributes<HTMLSelectElement>) {
+  return (
+    <select {...props} className={`${fieldBase} ${props.className ?? ""}`}>
+      {children}
+    </select>
+  );
+}
+
+export function Field({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: ReactNode;
+}) {
+  return (
+    <label className="block space-y-1">
+      <span className="text-xs font-medium text-fg-muted">{label}</span>
+      {children}
+      {hint && <span className="block text-xs text-fg-faint">{hint}</span>}
+    </label>
+  );
+}
+
 export function Badge({ children }: { children: ReactNode }) {
   return (
     <span className="rounded-pill border border-edge px-2 py-0.5 text-xs text-fg-muted">
