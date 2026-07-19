@@ -18,6 +18,8 @@ import {
   type ResourceState,
 } from "@/components/ui";
 import { CopyField } from "@/components/copy";
+import { BranchActions } from "./branch-actions";
+import { NewBranchForm } from "./new-branch-form";
 
 export const dynamic = "force-dynamic";
 
@@ -142,17 +144,23 @@ export default async function ProjectPage({
         <div className="space-y-4">
           {branches.map((b) => (
             <Card key={b.id}>
-              <div className="flex flex-wrap items-center gap-2">
-                <StatusDot state={dotState(b.state)} />
-                <span className="text-sm font-medium">{b.name}</span>
-                <Badge>{b.role}</Badge>
-                {b.parent === null && <Badge>default</Badge>}
-                <span className="ml-auto text-xs text-fg-muted">
-                  {b.compute.min_cu}–{b.compute.max_cu} CU
-                  {b.compute.current_cu ? ` · at ${b.compute.current_cu}` : ""}
-                </span>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <StatusDot state={dotState(b.state)} />
+                  <span className="text-sm font-medium">{b.name}</span>
+                  <Badge>{b.role}</Badge>
+                  {b.parent === null && <Badge>default</Badge>}
+                </div>
+                <BranchActions
+                  prjId={prj}
+                  brId={b.id}
+                  state={b.state}
+                  minCu={b.compute.min_cu}
+                  maxCu={b.compute.max_cu}
+                  currentCu={b.compute.current_cu ?? 0}
+                />
               </div>
-              <div className="mt-4 space-y-3">
+              <div className="mt-3 space-y-3">
                 {b.endpoints.length === 0 ? (
                   <p className="text-xs text-fg-muted">No endpoints yet.</p>
                 ) : (
@@ -167,8 +175,21 @@ export default async function ProjectPage({
                   ))
                 )}
               </div>
+              <div className="mt-3 border-t border-edge pt-3 text-xs text-fg-muted">
+                {b.compute.min_cu}–{b.compute.max_cu} CU
+                {b.compute.current_cu ? ` · running at ${b.compute.current_cu}` : ""}
+              </div>
             </Card>
           ))}
+        </div>
+
+        <div className="mt-4">
+          <Card title="New branch">
+            <NewBranchForm
+              prjId={prj}
+              branches={branches.map((b) => ({ id: b.id, name: b.name }))}
+            />
+          </Card>
         </div>
       </div>
     </div>

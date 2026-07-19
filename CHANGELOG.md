@@ -2,6 +2,37 @@
 
 All notable changes to this repository. Format loosely follows [Keep a Changelog](https://keepachangelog.com/); one entry per phase gate plus notable intermediate merges.
 
+## [Phase 3 — console: branch management (first write surface)] — 2026-07-19
+
+The console stops being read-only: branches can now be created and driven through their
+lifecycle from the project detail page, against the existing control-plane endpoints.
+
+### Added
+- **Create branch** — a form on the project detail page (`POST /projects/{prj}/branches`): name,
+  role, and the fork parent (`from_branch`, defaulting to the project's default branch — a branch is
+  a data fork of its parent, ADR-016).
+- **Branch lifecycle actions** — per-branch **Suspend** / **Resume** / **Resize** controls, wired to
+  `POST /branches/{br}/{suspend,resume,resize}`. Which controls show is driven by the branch's
+  current state (ready → suspend/resize; suspended → resume; transitional → "working…"), mirroring
+  the control-plane state machine; a raced 409 still surfaces inline. Resize takes a CU value
+  clamped to the branch's `min_cu`/`max_cu` bounds (the server clamps authoritatively).
+- **Server actions** (`app/projects/[prj]/actions.ts`, `"use server"`) call the one typed client
+  with the request's key and `revalidatePath` the detail page on success, so the new state renders
+  without a manual refresh. Errors are normalized (`friendlyError`) and shown inline, never thrown to
+  the error boundary.
+- **Form primitives** — `Input`, `Select`, `Field` added to the design system (the §3 form-control
+  gap's first slice), reused by the connect flow's styling idiom.
+
+### Security / trust
+- Action arguments (project/branch IDs) come from the client but confer no authority: every call is
+  authorized by the caller's API key and RLS-scoped in the control plane, so a tampered ID can only
+  reach resources the key already governs. Actions with no session cookie get a 401 and render an
+  error (the page already redirects unauthenticated users).
+
+### Verification
+- `tsc --noEmit` and `next build` clean (detail route now bundles the client controls). Boot check:
+  the detail route still 307-redirects to `/connect` without a session.
+
 ## [Phase 3 — console v1: live read surface + API-key connect] — 2026-07-19
 
 The console stops being a static shell and reads live data from the control plane. This is the
