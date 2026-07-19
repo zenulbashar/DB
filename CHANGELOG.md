@@ -2,6 +2,33 @@
 
 All notable changes to this repository. Format loosely follows [Keep a Changelog](https://keepachangelog.com/); one entry per phase gate plus notable intermediate merges.
 
+## [Phase 4 — branching / data forks] — 2026-07-19
+
+### Decided (ADR-016)
+- A branch is a **data fork**: every non-root branch (`parent_id` set) provisions its cluster by
+  CNPG `bootstrap.recovery` from the **parent's WAL archive** (an `externalClusters` origin), not an
+  empty `initdb`. The default branch `main` is the sole root (empty). Reuses the barman archive we
+  already keep for PITR/backups — no new copy mechanism, and works on any substrate. CoW volume
+  snapshots remain the Gen-2 speedup.
+
+### Added
+- **`BuildBranchedCluster`** — renders a fork with the **child's own** compute spec and **own**
+  forward WAL-archive stream (a distinct `destinationPath`), bootstrapped by recovery from the
+  parent's archive. `reconciler.clusterFor` routes a parented branch through it (and falls back to
+  empty `initdb` in local dev without a backup config, with a logged warning).
+- **Point-in-time forks** — `POST /branches {from_branch, at}` (RFC3339) sets
+  `recoveryTarget.targetTime`; `at` requires `from_branch` and is stored immutably in
+  `branches.bootstrap_at` (migration `0009`), surfaced on the Branch resource and plumbed to the
+  reconciler. Spec-first: `api/openapi.yaml` `createBranch.at` + `Branch.bootstrap_at` + regenerated
+  TS client.
+
+### Tests
+- Reconciler: `BuildBranchedCluster` bootstrap/`externalClusters` shape (origin at the parent's
+  path, child keeps its own archive + compute), PITR `recoveryTarget`, a forked branch provisions
+  via recovery bootstrap, and the root branch stays `initdb`. Store: `bootstrap_at` round-trips
+  through create/get/reconcile-work; root branch has none. Server: `POST /branches {at}` (fork
+  echoes `bootstrap_at`; `at` without `from_branch` → 400; malformed `at` → 400).
+
 ## [Phase 4 — read replicas & read endpoint] — 2026-07-19
 
 ### Added

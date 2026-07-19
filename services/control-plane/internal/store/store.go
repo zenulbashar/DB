@@ -127,6 +127,9 @@ type CreateBranchParams struct {
 	Role      domain.BranchRole
 	Compute   domain.Compute // zero-valued fields take schema defaults
 	Region    string         // for endpoint host derivation
+	// BootstrapAt sets the point-in-time recovery target for a data fork
+	// (ADR-016); nil forks from the parent's latest state.
+	BootstrapAt *time.Time
 }
 
 type UpdateBranchParams struct {

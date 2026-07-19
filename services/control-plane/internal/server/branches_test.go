@@ -7,12 +7,13 @@ import (
 )
 
 type branchJSON struct {
-	ID      string  `json:"id"`
-	Name    string  `json:"name"`
-	Role    string  `json:"role"`
-	State   string  `json:"state"`
-	Parent  *string `json:"parent"`
-	Compute struct {
+	ID          string  `json:"id"`
+	Name        string  `json:"name"`
+	Role        string  `json:"role"`
+	State       string  `json:"state"`
+	Parent      *string `json:"parent"`
+	BootstrapAt *string `json:"bootstrap_at"`
+	Compute     struct {
 		MinCU           float64 `json:"min_cu"`
 		MaxCU           float64 `json:"max_cu"`
 		SuspendTimeoutS int     `json:"suspend_timeout_s"`
@@ -194,6 +195,37 @@ func TestBranchSuspendResumeWiring(t *testing.T) {
 	// Unknown branch → 404.
 	if status, _ = do(t, e.h, "POST", "/v1/branches/br_nope/suspend", e.token, nil, nil); status != http.StatusNotFound {
 		t.Fatalf("suspend unknown branch = %d, want 404", status)
+	}
+}
+
+func TestBranchPITRForkWiring(t *testing.T) {
+	e := bootstrapped(t)
+	prjID, defBr := createProject(t, e, "forks")
+
+	// Fork at a point in time.
+	status, body := do(t, e.h, "POST", "/v1/projects/"+prjID+"/branches", e.token,
+		map[string]any{"name": "fork", "from_branch": defBr, "at": "2026-01-02T03:04:05Z"}, nil)
+	if status != http.StatusCreated {
+		t.Fatalf("PITR fork = %d (%s)", status, body)
+	}
+	var b branchJSON
+	mustUnmarshal(t, body, &b)
+	if b.BootstrapAt == nil || *b.BootstrapAt == "" {
+		t.Fatalf("fork response missing bootstrap_at: %+v", b)
+	}
+	if b.Parent == nil || *b.Parent != defBr {
+		t.Fatalf("fork parent = %v, want %s", b.Parent, defBr)
+	}
+
+	// `at` requires from_branch.
+	if s, _ := do(t, e.h, "POST", "/v1/projects/"+prjID+"/branches", e.token,
+		map[string]any{"name": "x", "at": "2026-01-02T03:04:05Z"}, nil); s != http.StatusBadRequest {
+		t.Fatalf("at without from_branch = %d, want 400", s)
+	}
+	// Malformed `at`.
+	if s, _ := do(t, e.h, "POST", "/v1/projects/"+prjID+"/branches", e.token,
+		map[string]any{"name": "y", "from_branch": defBr, "at": "not-a-timestamp"}, nil); s != http.StatusBadRequest {
+		t.Fatalf("bad at = %d, want 400", s)
 	}
 }
 

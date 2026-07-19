@@ -155,9 +155,12 @@ on-connect wake, and Nimbus's deploy-time prewarm ping (R-3) — one path, one i
 
 ### 3.4 Branching (Phase 4)
 
-`POST /v1/projects/{id}/branches` with `{ from: "main", at: "<timestamp|lsn|now>" }` →
-reconciler takes/uses a CSI `VolumeSnapshot` (or restores base backup + replays WAL to the
-requested point) → new CNPG cluster from that volume → new endpoints. Storage is CoW where the
+`POST /v1/projects/{id}/branches` with `{ from_branch: "main", at?: "<timestamp>" }` → the branch
+is a **data fork**: the reconciler provisions its CNPG cluster by `bootstrap.recovery` from the
+parent's WAL archive (an `externalClusters` origin), replaying to `at` (or the latest state when
+omitted), then adds its endpoints (ADR-016). The fork gets its own compute and its own forward
+archive stream — fully independent of the parent afterwards. Gen-1 branch-create latency is a full
+recovery (honest seconds-to-minutes by size); CoW `VolumeSnapshot` is the Gen-2 speedup where the
 CSI driver supports it. Detail in DATABASE_ARCHITECTURE §6.
 
 ### 3.5 Usage metering

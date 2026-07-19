@@ -79,7 +79,11 @@ type Branch struct {
 	State         ResourceState `json:"state"`
 	Compute       Compute       `json:"compute"`
 	RetentionDays int           `json:"retention_days"`
-	CreatedAt     time.Time     `json:"created_at"`
+	// BootstrapAt is the point-in-time recovery target when this branch was
+	// forked from its parent (ADR-016); nil means it was forked from the latest
+	// state ("now"), or is the root branch.
+	BootstrapAt *time.Time `json:"bootstrap_at,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
 	// Populated on single-branch reads; nil on list responses.
 	Endpoints []Endpoint `json:"endpoints,omitempty"`
 }

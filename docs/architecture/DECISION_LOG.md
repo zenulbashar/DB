@@ -169,6 +169,33 @@ autosuspend for a branch (paid-plan opt-out, MIGRATION_STRATEGY/DATABASE_ARCHITE
 ready-only sweep). This reuses the gateway↔control-plane auth + the ADR-014 state machine; the only
 new privileged mutation is the idle `ready → suspending` flip performed inside the reconciler.
 
+## ADR-016 · A branch is a data fork: non-root branches bootstrap by CNPG recovery from the parent's WAL archive — `accepted`
+**Context:** "Branching" must give a new branch its parent's data (like Neon), optionally at a
+point in time (`POST /branches {from_branch, at?}`). Options for the copy: CNPG volume snapshots
+(CoW, fast, storage-class-dependent), `pg_basebackup` streaming from the live parent (needs the
+parent up + replication certs, adds load to the primary), or **recovery bootstrap from the parent's
+barman WAL archive** (the same archive we already keep for PITR/backups).
+**Decision:** every non-root branch is a **data fork** provisioned by CNPG `bootstrap.recovery` from
+its parent's WAL archive (an `externalClusters` origin pointing at the parent's barman object
+store). "Branch from now" recovers to the latest archived WAL; "branch at `T`" sets
+`recoveryTarget.targetTime = T` (`branches.bootstrap_at`, immutable — a bootstrap parameter). The
+child gets its **own** compute spec and its **own** forward WAL-archive stream (a distinct
+`destinationPath`), so the fork is fully independent of the parent afterwards; the parent's archive
+is read-only to it. The project's default branch `main` is the sole **root** (`parent_id` NULL) and
+bootstraps `initdb` (empty). This reuses the Phase 2e recovery-cluster builder — branching is the
+third consumer alongside restore-verification and instant-restore.
+**Alternatives:** volume snapshots (deferred to Gen-2 / a storage-class that supports them — the
+fast CoW path, but not portable across substrates); `pg_basebackup` from the live parent (rejected
+for v1 — loads the primary and needs replication-cert plumbing, whereas the WAL archive is already
+there and read-only). Both remain open as faster paths later; the API contract (`from_branch`,
+`at`) is copy-mechanism-agnostic.
+**Consequences:** branching **requires** the parent to have a WAL archive — so it needs
+`BackupConfig` (always set in staging/prod; in local dev without backups a branch falls back to an
+empty `initdb` cluster with a logged warning). Branch-create latency is a full recovery (seconds to
+minutes by size) — the honest Gen-1 number; CoW snapshots are the Gen-2 speedup. A branch created
+`at` a time before the parent's retention window will fail recovery (surfaced as the branch going
+`error`); the API documents the retention bound.
+
 ---
 
 ## Open questions — **all answered by owner, 2026-07-17**

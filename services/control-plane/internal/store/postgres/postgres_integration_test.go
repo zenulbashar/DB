@@ -533,6 +533,49 @@ func TestSuspendResumeFlow(t *testing.T) {
 	}
 }
 
+func TestBranchBootstrapAtPersists(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	res := bootstrapOrg(t, s, "acme")
+	pr, err := s.CreateProject(ctx, store.CreateProjectParams{OrgID: res.Org.ID, Name: "App", Region: "syd1", PGVersion: 17})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defBr := *pr.DefaultBranchID
+	at := time.Now().Add(-time.Hour).UTC().Truncate(time.Second)
+
+	fork, err := s.CreateBranch(ctx, store.CreateBranchParams{
+		OrgID: res.Org.ID, ProjectID: pr.ID, Name: "fork", ParentID: &defBr,
+		Role: domain.BranchDevelopment, BootstrapAt: &at,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fork.BootstrapAt == nil || !fork.BootstrapAt.Equal(at) {
+		t.Fatalf("create returned bootstrap_at = %v, want %v", fork.BootstrapAt, at)
+	}
+	// Persisted + read back.
+	got, _ := s.GetBranch(ctx, res.Org.ID, fork.ID)
+	if got.BootstrapAt == nil || !got.BootstrapAt.Equal(at) {
+		t.Fatalf("read-back bootstrap_at = %v, want %v", got.BootstrapAt, at)
+	}
+	// The reconciler sees it (drives the recovery target).
+	work, _ := s.ListReconcileWork(ctx)
+	var seen *time.Time
+	for _, w := range work {
+		if w.Branch.ID == fork.ID {
+			seen = w.Branch.BootstrapAt
+		}
+	}
+	if seen == nil || !seen.Equal(at) {
+		t.Fatalf("reconcile-work bootstrap_at = %v, want %v", seen, at)
+	}
+	// The root branch has no bootstrap target.
+	if root, _ := s.GetBranch(ctx, res.Org.ID, defBr); root.BootstrapAt != nil {
+		t.Fatalf("root branch bootstrap_at = %v, want nil", root.BootstrapAt)
+	}
+}
+
 func TestCreateReadEndpoint(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()
