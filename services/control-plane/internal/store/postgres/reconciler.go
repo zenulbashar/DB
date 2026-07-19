@@ -6,6 +6,7 @@ package postgres
 
 import (
 	"context"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -66,11 +67,13 @@ func (s *Store) ListReconcileWork(ctx context.Context) ([]BranchWork, error) {
 	return out, err
 }
 
-// MarkBranchReady flips a provisioning branch (and its endpoints) to ready.
+// MarkBranchReady flips a provisioning branch (and its endpoints) to ready. It
+// seeds last_active_at so a freshly-ready branch gets a full suspend_timeout
+// grace period before the idle sweep can suspend it (ADR-015).
 func (s *Store) MarkBranchReady(ctx context.Context, branchID string) error {
 	return s.withPrivTx(ctx, func(tx pgx.Tx) error {
 		ct, err := tx.Exec(ctx,
-			`UPDATE branches SET state = 'ready' WHERE id = $1 AND state = 'provisioning'`, branchID)
+			`UPDATE branches SET state = 'ready', last_active_at = now() WHERE id = $1 AND state = 'provisioning'`, branchID)
 		if err != nil || ct.RowsAffected() == 0 {
 			return err
 		}
@@ -96,8 +99,14 @@ func (s *Store) MarkBranchResumed(ctx context.Context, branchID string) error {
 
 func (s *Store) markBranchComputeState(ctx context.Context, branchID, from, to string) error {
 	return s.withPrivTx(ctx, func(tx pgx.Tx) error {
+		// Reset the idle clock when a branch returns to ready (resume), so it is
+		// not immediately re-suspended by a stale last_active_at (ADR-015).
+		set := "state = $2"
+		if to == "ready" {
+			set = "state = $2, last_active_at = now()"
+		}
 		ct, err := tx.Exec(ctx,
-			`UPDATE branches SET state = $2 WHERE id = $1 AND state = $3`, branchID, to, from)
+			`UPDATE branches SET `+set+` WHERE id = $1 AND state = $3`, branchID, to, from)
 		if err != nil || ct.RowsAffected() == 0 {
 			return err
 		}
@@ -105,6 +114,103 @@ func (s *Store) markBranchComputeState(ctx context.Context, branchID, from, to s
 			`UPDATE endpoints SET state = $2 WHERE branch_id = $1 AND state = $3`, branchID, to, from)
 		return err
 	})
+}
+
+// ReportGatewayActivity records one gateway replica's per-branch active
+// connection counts (ADR-015). It upserts the (branch, gateway) telemetry row
+// and bumps last_active_at for any branch this report shows as active, so the
+// idle clock reflects the whole fleet's traffic. Privileged: called by the
+// gateway via the internal API, not the tenant path.
+func (s *Store) ReportGatewayActivity(ctx context.Context, gatewayID string, counts map[string]int) error {
+	if gatewayID == "" || len(counts) == 0 {
+		return nil
+	}
+	return s.withPrivTx(ctx, func(tx pgx.Tx) error {
+		var active []string
+		for branchID, n := range counts {
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO branch_activity (branch_id, gateway_id, active_conns, reported_at)
+				VALUES ($1, $2, $3, now())
+				ON CONFLICT (branch_id, gateway_id)
+				DO UPDATE SET active_conns = EXCLUDED.active_conns, reported_at = now()`,
+				branchID, gatewayID, n); err != nil {
+				return err
+			}
+			if n > 0 {
+				active = append(active, branchID)
+			}
+		}
+		if len(active) > 0 {
+			if _, err := tx.Exec(ctx,
+				`UPDATE branches SET last_active_at = now()
+				  WHERE id = ANY($1) AND state IN ('ready', 'resuming')`, active); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// SweepIdleBranches flips ready branches that have been globally idle past their
+// suspend_timeout to suspending (the reconciler then hibernates them; ADR-015).
+// "Globally idle" = the active-connection count summed across all gateways that
+// reported within staleWindow is zero. It is FAIL-SAFE: if no gateway has
+// reported within staleWindow it does nothing, so activity-reporting downtime
+// can never mass-suspend the fleet. Returns the branch ids it flipped.
+func (s *Store) SweepIdleBranches(ctx context.Context, staleWindow time.Duration) ([]string, error) {
+	stale := staleWindow.Seconds()
+	var flipped []string
+	err := s.withPrivTx(ctx, func(tx pgx.Tx) error {
+		var reportingLive bool
+		if err := tx.QueryRow(ctx,
+			`SELECT EXISTS (SELECT 1 FROM branch_activity WHERE reported_at > now() - make_interval(secs => $1))`,
+			stale).Scan(&reportingLive); err != nil {
+			return err
+		}
+		if !reportingLive {
+			return nil // blind — never suspend when no gateway is reporting
+		}
+		rows, err := tx.Query(ctx, `
+			SELECT b.id FROM branches b
+			 WHERE b.state = 'ready' AND b.suspend_timeout_s > 0
+			   AND (b.last_active_at IS NULL
+			        OR b.last_active_at < now() - make_interval(secs => b.suspend_timeout_s))
+			   AND COALESCE((
+			        SELECT sum(a.active_conns) FROM branch_activity a
+			         WHERE a.branch_id = b.id AND a.reported_at > now() - make_interval(secs => $1)
+			   ), 0) = 0
+			 ORDER BY b.id
+			 FOR UPDATE OF b SKIP LOCKED`, stale)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		var ids []string
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return err
+			}
+			ids = append(ids, id)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if len(ids) == 0 {
+			return nil
+		}
+		if _, err := tx.Exec(ctx,
+			`UPDATE branches SET state = 'suspending' WHERE id = ANY($1) AND state = 'ready'`, ids); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx,
+			`UPDATE endpoints SET state = 'suspending' WHERE branch_id = ANY($1) AND state = 'ready'`, ids); err != nil {
+			return err
+		}
+		flipped = ids
+		return nil
+	})
+	return flipped, err
 }
 
 // FinishBranchTeardown removes a deleting branch's rows after its Kubernetes

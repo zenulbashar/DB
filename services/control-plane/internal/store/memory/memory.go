@@ -40,6 +40,9 @@ type Store struct {
 	imports     map[string]domain.Import
 	audit       []domain.AuditEntry
 	idem        map[idemKey]idemEntry
+	// gwActivity[gatewayID][branchID] = last reported active connection count
+	// (suspend-on-idle telemetry; the postgres store holds the real aggregation).
+	gwActivity map[string]map[string]int
 }
 
 func New() *Store {
@@ -57,6 +60,7 @@ func New() *Store {
 		databases:   map[dbKey]domain.Database{},
 		imports:     map[string]domain.Import{},
 		idem:        map[idemKey]idemEntry{},
+		gwActivity:  map[string]map[string]int{},
 	}
 }
 

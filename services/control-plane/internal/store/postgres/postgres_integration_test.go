@@ -533,6 +533,95 @@ func TestSuspendResumeFlow(t *testing.T) {
 	}
 }
 
+func TestSuspendOnIdle(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	res := bootstrapOrg(t, s, "acme")
+	pr, err := s.CreateProject(ctx, store.CreateProjectParams{OrgID: res.Org.ID, Name: "App", Region: "syd1", PGVersion: 17})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a set of branches exercising every sweep case. Helper: make a ready
+	// branch and return its id.
+	ready := func(name string, timeout int, aged bool) string {
+		br, err := s.CreateBranch(ctx, store.CreateBranchParams{
+			OrgID: res.Org.ID, ProjectID: pr.ID, Name: name, Role: domain.BranchDevelopment,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.MarkBranchReady(ctx, br.ID); err != nil { // seeds last_active_at = now
+			t.Fatal(err)
+		}
+		// Adjust the timeout and age the idle clock PRIVILEGED — a bare pool
+		// connection runs under RLS with no org context, so these UPDATEs would
+		// silently match zero rows.
+		if err := s.withPrivTx(ctx, func(tx pgx.Tx) error {
+			if _, e := tx.Exec(ctx, `UPDATE branches SET suspend_timeout_s = $2 WHERE id = $1`, br.ID, timeout); e != nil {
+				return e
+			}
+			if aged {
+				if _, e := tx.Exec(ctx, `UPDATE branches SET last_active_at = now() - interval '1 hour' WHERE id = $1`, br.ID); e != nil {
+					return e
+				}
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return br.ID
+	}
+
+	brIdle := ready("idle", 300, true)           // idle past timeout → suspend
+	brGrace := ready("grace", 300, false)        // recently ready → grace, no suspend
+	brActive := ready("active", 300, true)       // active on gw-1 → no suspend
+	brElsewhere := ready("elsewhere", 300, true) // active on gw-2 only → no suspend
+	brDisabled := ready("disabled", 0, true)     // autosuspend off → no suspend
+
+	stale := 60 * time.Second
+
+	// Fail-safe: with NO gateway reporting, an idle branch is NOT swept.
+	if ids, err := s.SweepIdleBranches(ctx, stale); err != nil || len(ids) != 0 {
+		t.Fatalf("sweep with no reports = %v (%v), want none (fail-safe)", ids, err)
+	}
+
+	// Reports arrive: gw-1 sees everyone (idle/grace/elsewhere/disabled at 0,
+	// active at 5); gw-2 sees the 'elsewhere' branch busy. Reporting active>0
+	// bumps last_active_at, so brActive/brElsewhere are no longer idle.
+	if err := s.ReportGatewayActivity(ctx, "gw-1", map[string]int{
+		brIdle: 0, brGrace: 0, brActive: 5, brElsewhere: 0, brDisabled: 0,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ReportGatewayActivity(ctx, "gw-2", map[string]int{brElsewhere: 3}); err != nil {
+		t.Fatal(err)
+	}
+
+	ids, err := s.SweepIdleBranches(ctx, stale)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 1 || ids[0] != brIdle {
+		t.Fatalf("swept = %v, want only the idle branch %s", ids, brIdle)
+	}
+	// The idle branch is now suspending (endpoints too); the others stay ready.
+	if b, _ := s.GetBranch(ctx, res.Org.ID, brIdle); b.State != domain.StateSuspending {
+		t.Fatalf("idle branch state = %s, want suspending", b.State)
+	}
+	for _, id := range []string{brGrace, brActive, brElsewhere, brDisabled} {
+		if b, _ := s.GetBranch(ctx, res.Org.ID, id); b.State != domain.StateReady {
+			t.Fatalf("branch %s state = %s, want ready (must not be swept)", id, b.State)
+		}
+	}
+
+	// Idempotent: a second sweep finds nothing new (the branch is now suspending,
+	// not ready).
+	if ids, err := s.SweepIdleBranches(ctx, stale); err != nil || len(ids) != 0 {
+		t.Fatalf("second sweep = %v (%v), want none", ids, err)
+	}
+}
+
 func TestRolesSecretsFlowAndRLS(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()

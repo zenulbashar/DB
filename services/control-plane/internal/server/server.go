@@ -59,6 +59,7 @@ func (s *Server) routes() {
 	// the shared gateway token (disabled entirely when unset). ADR-014.
 	s.mux.Route("/internal", func(r chi.Router) {
 		r.Post("/branches/{br}/wake", s.authenticateGateway(s.handleWakeBranchInternal))
+		r.Post("/gateway-activity", s.authenticateGateway(s.handleGatewayActivity))
 	})
 
 	s.mux.Route("/v1", func(r chi.Router) {

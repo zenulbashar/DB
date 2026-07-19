@@ -70,6 +70,29 @@ func TestInternalWakeEndpoint(t *testing.T) {
 	}
 }
 
+func TestInternalGatewayActivityEndpoint(t *testing.T) {
+	h := gatewayServer(t, gatewayTok)
+
+	// No token → 401.
+	if s, _ := do(t, h, "POST", "/internal/gateway-activity", "", map[string]any{
+		"gateway_id": "gw-1", "branches": map[string]int{"br_1": 0},
+	}, nil); s != http.StatusUnauthorized {
+		t.Fatalf("activity without token = %d, want 401", s)
+	}
+	// Valid token + payload → 204.
+	if s, _ := do(t, h, "POST", "/internal/gateway-activity", gatewayTok, map[string]any{
+		"gateway_id": "gw-1", "branches": map[string]int{"br_1": 3, "br_2": 0},
+	}, nil); s != http.StatusNoContent {
+		t.Fatalf("activity report = %d, want 204", s)
+	}
+	// Missing gateway_id → 400.
+	if s, _ := do(t, h, "POST", "/internal/gateway-activity", gatewayTok, map[string]any{
+		"branches": map[string]int{"br_1": 0},
+	}, nil); s != http.StatusBadRequest {
+		t.Fatalf("activity without gateway_id = %d, want 400", s)
+	}
+}
+
 func TestInternalWakeDisabledWithoutToken(t *testing.T) {
 	// With no GatewayToken configured the whole /internal surface rejects
 	// everything — a shared secret must be explicitly provisioned.

@@ -1,12 +1,15 @@
-// Package wake triggers scale-to-zero wake-on-connect: when a client hits a
-// suspended endpoint the gateway asks the control plane to resume the branch
-// (ADR-014). The trigger is a single authenticated POST to the control-plane's
-// privileged internal endpoint; it is COALESCED per branch so a connection
-// storm produces one wake, not one per connection (SECURITY_MODEL §2).
+// Package wake is the gateway's client for the control-plane's privileged
+// internal API (ADR-014, ADR-015): it triggers scale-to-zero wake-on-connect
+// (COALESCED per branch so a connection storm produces one wake, not one per
+// connection — SECURITY_MODEL §2) and reports per-branch activity that drives
+// the suspend-on-idle decision. Both are authenticated POSTs bearing
+// NDB_GATEWAY_TOKEN.
 package wake
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -61,6 +64,56 @@ func (h *HTTPWaker) Wake(_ context.Context, branchID string) error {
 		return nil, h.post(branchID)
 	})
 	return err
+}
+
+// Reporter reports this gateway's per-branch active connection counts to the
+// control plane for the suspend-on-idle decision (ADR-015).
+type Reporter interface {
+	Report(ctx context.Context, gatewayID string, counts map[string]int) error
+}
+
+// HTTPReporter POSTs activity to {baseURL}/internal/gateway-activity.
+type HTTPReporter struct {
+	baseURL string
+	token   string
+	client  *http.Client
+}
+
+func NewHTTPReporter(baseURL, token string, timeout time.Duration) *HTTPReporter {
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	return &HTTPReporter{
+		baseURL: strings.TrimRight(baseURL, "/"),
+		token:   token,
+		client:  &http.Client{Timeout: timeout},
+	}
+}
+
+func (h *HTTPReporter) Report(ctx context.Context, gatewayID string, counts map[string]int) error {
+	body, err := json.Marshal(struct {
+		GatewayID string         `json:"gateway_id"`
+		Branches  map[string]int `json:"branches"`
+	}{GatewayID: gatewayID, Branches: counts})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		h.baseURL+"/internal/gateway-activity", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+h.token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := h.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("activity report: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		return fmt.Errorf("activity report: control plane returned %d", resp.StatusCode)
+	}
+	return nil
 }
 
 func (h *HTTPWaker) post(branchID string) error {

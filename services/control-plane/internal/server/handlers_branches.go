@@ -195,6 +195,28 @@ func (s *Server) handleWakeBranchInternal(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, b)
 }
 
+// handleGatewayActivity ingests a gateway replica's per-branch active
+// connection counts for the suspend-on-idle decision (ADR-015). Authenticated
+// by the gateway token; it is fire-and-forget telemetry, so it returns 204.
+func (s *Server) handleGatewayActivity(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		GatewayID string         `json:"gateway_id"`
+		Branches  map[string]int `json:"branches"`
+	}
+	if !decode(w, r, &req) {
+		return
+	}
+	if req.GatewayID == "" {
+		writeProblem(w, r, http.StatusBadRequest, "validation", "Validation failed", "gateway_id is required.")
+		return
+	}
+	if err := s.store.ReportGatewayActivity(r.Context(), req.GatewayID, req.Branches); err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // branchErr maps an illegal compute-state transition to 409 with a clear
 // message (a branch that is provisioning/deleting/error cannot be
 // suspended/resumed); everything else defers to storeErr.

@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"testing"
+	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -24,6 +25,7 @@ type fakeSource struct {
 	suspended []string
 	resumed   []string
 	tornDown  []string
+	sweptIdle []string
 	liveCount map[string]int
 }
 
@@ -51,6 +53,9 @@ func (f *fakeSource) CountLiveBranches(_ context.Context, projectID string) (int
 }
 func (f *fakeSource) ListRoutableEndpoints(context.Context) ([]postgres.RoutableEndpoint, error) {
 	return f.routable, nil
+}
+func (f *fakeSource) SweepIdleBranches(context.Context, time.Duration) ([]string, error) {
+	return f.sweptIdle, nil
 }
 
 func testWork(state domain.ResourceState, role domain.BranchRole) postgres.BranchWork {
