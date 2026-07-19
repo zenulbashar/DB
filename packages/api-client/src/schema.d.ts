@@ -676,10 +676,10 @@ export interface components {
         /** @enum {string} */
         BranchRole: "production" | "preview" | "development";
         /**
-         * @description Lifecycle/compute state shared by branches and endpoints. `suspending` and `resuming` are transient scale-to-zero states the reconciler converges (ADR-014).
+         * @description Lifecycle/compute state shared by branches and endpoints. `suspending` and `resuming` are transient scale-to-zero states the reconciler converges (ADR-014); `resizing` is the transient vertical-resize state while the cluster is re-applied at a new compute size.
          * @enum {string}
          */
-        ResourceState: "provisioning" | "ready" | "suspending" | "suspended" | "resuming" | "error" | "deleting";
+        ResourceState: "provisioning" | "ready" | "suspending" | "suspended" | "resuming" | "resizing" | "error" | "deleting";
         Compute: {
             min_cu: number;
             max_cu: number;

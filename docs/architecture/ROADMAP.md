@@ -38,6 +38,12 @@
 
 ## Phase 3 — Console v1 & developer surface
 
+**Landed so far (read surface + connect):** API-key connect flow (httpOnly cookie session, server
+auth guard, sign-out), live projects dashboard, project detail (branch list + per-branch endpoints +
+compute bounds), and the masked connection-string panel with one-click copy — all reading the live
+control plane through the one typed client (ADR-012). The items below (magic-link sessions, write
+flows, SQL editor, metrics, role/API-key management UIs) are the remaining Phase 3 slices.
+
 **Scope**
 - Console auth: email magic-link sessions (+ the SECURITY_MODEL §3 session semantics; ADR-013 moved this here from Phase 1).
 - Console: org/project dashboards, connection-string panel (copy variants for `pg`, Drizzle, Prisma, psql), role management UI, branch list, metrics dashboards (Prometheus-backed), audit-log viewer, API-key management, secrets/connection-string rotation flows.

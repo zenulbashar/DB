@@ -1,25 +1,36 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import "./globals.css";
+import { getToken } from "@/lib/session";
+import { signOut } from "./connect/actions";
 
 export const metadata: Metadata = {
   title: "NimbusDB Console",
   description: "Serverless PostgreSQL for the Nimbus platform",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  const connected = Boolean(await getToken());
   return (
     <html lang="en">
       <body>
         <header className="border-b border-edge bg-forest">
           <div className="mx-auto flex h-14 max-w-6xl items-center gap-3 px-6">
-            <span className="font-semibold tracking-tight">
+            <Link href="/" className="font-semibold tracking-tight">
               Nimbus<span className="text-accent">DB</span>
-            </span>
+            </Link>
             <span className="rounded-pill border border-forest-edge px-2 py-0.5 text-xs text-fg-muted">
-              Phase 1 preview
+              console
             </span>
+            {connected && (
+              <form action={signOut} className="ml-auto">
+                <button className="text-xs text-fg-muted transition-colors hover:text-fg">
+                  Sign out
+                </button>
+              </form>
+            )}
           </div>
         </header>
         <main className="mx-auto max-w-6xl px-6 py-10">{children}</main>

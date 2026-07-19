@@ -2,6 +2,42 @@
 
 All notable changes to this repository. Format loosely follows [Keep a Changelog](https://keepachangelog.com/); one entry per phase gate plus notable intermediate merges.
 
+## [Phase 3 — console v1: live read surface + API-key connect] — 2026-07-19
+
+The console stops being a static shell and reads live data from the control plane. This is the
+Phase 3 read surface (ROADMAP Phase 3); write flows, the SQL editor, metrics, and email
+magic-link sessions layer on next.
+
+### Added
+- **API-key connect flow** — the console signs in by validating a pasted `ndb_` key against the
+  control plane (`listProjects`) and persisting it in an **httpOnly** cookie (`console/src/lib/session.ts`).
+  This is the same credential the CLI/Nimbus integration use (ADR-013); email magic-link sessions
+  (SECURITY_MODEL §3) are still deferred to a later Phase 3 slice. Server-side auth guard: every
+  page redirects to `/connect` without a valid session; `Sign out` clears the cookie.
+- **Live projects dashboard** (`/`) — server component reads `GET /projects` with the request's key
+  and renders project cards (name, lifecycle `StatusDot`, PG version, region) linking to detail.
+  Empty and error states are first-class (`EmptyState`, `ErrorNote`).
+- **Project detail** (`/projects/{prj}`) — branch list with per-branch endpoints and compute bounds
+  (`min–max CU`, current size), plus a **connection panel**: the masked connection URI assembled
+  server-side via `GET /projects/{prj}/connection-uri` (never reveals a password — reveal stays the
+  audited `roles:write` API path). One-click copy on connection strings and endpoint hosts (`CopyField`).
+- **API client wiring** — one typed client for the whole console (ADR-012): `serverClient()` carries
+  the caller's key from their cookie; `friendlyError()` normalizes `ApiError`/network failures into
+  renderable text. No ad-hoc `fetch` in the console.
+- **Design primitives** — `EmptyState`, `ErrorNote`, `CopyField` (mono value + copy button, secret
+  masking), and the lifecycle `StatusDot` extended to all 8 resource states (transitional states
+  pulse). `next.config.ts` transpiles the workspace `@nimbusdb/api-client`.
+
+### Fixed
+- **Spec-first contract gap** — `ResourceState` in `api/openapi.yaml` was missing `resizing` (the
+  vertical-resize state shipped in the previous increment); a branch mid-resize is a state the API
+  can return, so the enum now includes it and the TS client was regenerated. The console renders it.
+
+### Tests / verification
+- `tsc --noEmit` and `next build` clean (4 routes; `/` and `/projects/[prj]` dynamic). End-to-end
+  boot check: `/` 307-redirects to `/connect` without a session; `/connect` serves the sign-in form.
+- The API-client `api-contract` CI job (lint + client-staleness) covers the regenerated schema.
+
 ## [Phase 4 — vertical resize] — 2026-07-19
 
 The zero-downtime vertical-resize substrate for compute autoscaling (ROADMAP Phase 4).

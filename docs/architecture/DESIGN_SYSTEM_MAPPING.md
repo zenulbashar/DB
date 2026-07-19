@@ -86,3 +86,16 @@ product design bundle). **Process when it arrives (docs-first rule):**
 
 Until then, Phase 3 proceeds on the Nimbus-derived interim system above — deliberately
 token-isolated so a re-skin is contained in the token layer and primitive styles.
+
+## 6. Implementation status (updated per increment)
+
+Built and live-wired (console read surface):
+- **Primitives:** `Button` (with `loading`), `Card`, `Badge`, `StatusDot` (all 8 lifecycle states;
+  transitional states pulse), `Spinner`, `EmptyState`, `ErrorNote`, `ConnectionString` (masking),
+  `CopyField` (mono value + one-click copy, the CodeBlock/ConnectionString §3 gap's first slice).
+- **Screens:** connect (§4 auth), projects dashboard, project overview (branch list + endpoints +
+  connection panel).
+
+Not yet built (later Phase 3 slices): `DataTable`, `Modal/Drawer`, `Toast`, `Tabs`, `Tooltip`,
+`Textarea`/`Combobox`, skeleton loaders, charts, the SQL editor, and the metrics/audit/role/API-key
+management screens. The token layer and re-skin isolation (§5) are unchanged by this slice.

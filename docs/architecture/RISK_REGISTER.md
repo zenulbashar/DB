@@ -19,6 +19,7 @@
 | **R-13** | **Neon OSS adoption (Gen 2) proves heavier than its benefit** — pageserver/safekeeper ops burden, upstream drift. | M | 8 | It's an *evaluation* with written exit criteria, not a commitment; Gen 1 remains fully supported; API designed storage-agnostic. | Evaluation report. |
 | **R-14** | **Compliance debt discovered late** (SOC2 evidence gaps, AU privacy obligations for external tenants). | L→M | 7 | Controls designed-in (SECURITY_MODEL §8); evidence generation automated from Phase 2 (audit log, CI attestations); legal/DPA work explicitly scheduled Phase 7. | First enterprise-prospect questionnaire. |
 | **R-15** | **Design export arrives late and forces console rework.** | L | 3 | Token-isolated theming (DESIGN_SYSTEM_MAPPING §5); re-skin contained by construction. | Export arrival. |
+| **R-16** | **Interim console auth is a long-lived API key in a cookie**, not a scoped session. Until email magic-link sessions land, a stolen `ndb_` key (broad scopes, long-lived) is the console credential; an XSS-exfiltrated or leaked key is high-impact. | M | 3 | Key stored **httpOnly** (no JS read) + `secure` in prod + `sameSite=lax`; console never renders the key back; secret reveal stays a separate audited `roles:write` API path (not the sign-in key); magic-link sessions with short TTL + rotation scheduled as the next Phase 3 slice to retire this. | Any leaked-key incident; magic-link sessions shipping (then retire). |
 
 **Retired risks:** none yet.
 

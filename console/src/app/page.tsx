@@ -1,51 +1,80 @@
+import Link from "next/link";
+import { redirect } from "next/navigation";
+import { getToken } from "@/lib/session";
+import { serverClient, friendlyError, type Project } from "@/lib/api";
 import {
   Badge,
-  Button,
-  Card,
-  ConnectionString,
+  EmptyState,
+  ErrorNote,
   StatusDot,
+  type ResourceState,
 } from "@/components/ui";
 
-/*
- * Phase 1 shell: static preview of the design system against the token layer.
- * Live data (projects, metrics, SQL editor) arrives with console auth in
- * Phase 3 (ROADMAP.md).
- */
-export default function Home() {
+// Live data; never statically cached (the API key lives in the request cookie).
+export const dynamic = "force-dynamic";
+
+// Projects carry their own lifecycle enum (`pending` before the reconciler
+// picks them up); map it onto the shared status palette.
+function dotState(state: string): ResourceState {
+  return state === "pending" ? "provisioning" : (state as ResourceState);
+}
+
+export default async function Home() {
+  if (!(await getToken())) redirect("/connect");
+
+  const client = await serverClient();
+  let projects: Project[] = [];
+  let error: string | undefined;
+  try {
+    const res = await client.listProjects({ limit: 100 });
+    projects = res.data ?? [];
+  } catch (e) {
+    error = friendlyError(e);
+  }
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight">Projects</h1>
-        <p className="mt-1 text-sm text-fg-muted">
-          Serverless PostgreSQL in <Badge>syd1</Badge> — control plane API is
-          live; provisioning lands in Phase 2.
-        </p>
+      <div className="flex items-end justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight">Projects</h1>
+          <p className="mt-1 text-sm text-fg-muted">
+            Serverless PostgreSQL on the Nimbus platform.
+          </p>
+        </div>
+        <Badge>{projects.length}</Badge>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Card title="prompt2eat">
-          <div className="flex items-center gap-2 text-sm text-fg-muted">
-            <StatusDot state="provisioning" /> pending · PG 17
-          </div>
-          <div className="mt-4">
-            <ConnectionString value="postgresql://app:secret@ep-example.syd1.db.nimbus.app/prompt2eat?sslmode=require" />
-          </div>
-        </Card>
-        <Card title="roster">
-          <div className="flex items-center gap-2 text-sm text-fg-muted">
-            <StatusDot state="ready" /> ready (preview) · PG 17
-          </div>
-          <div className="mt-4">
-            <ConnectionString value="postgresql://app:secret@ep-sample.syd1.db.nimbus.app/roster?sslmode=require" />
-          </div>
-        </Card>
-      </div>
+      {error && <ErrorNote>{error}</ErrorNote>}
 
-      <div className="flex gap-3">
-        <Button>New project</Button>
-        <Button variant="secondary">Import database</Button>
-        <Button variant="ghost">Documentation</Button>
-      </div>
+      {!error && projects.length === 0 && (
+        <EmptyState
+          title="No projects yet"
+          hint="Create one with the control-plane API or CLI; provisioning UI lands next."
+        />
+      )}
+
+      {projects.length > 0 && (
+        <div className="grid gap-4 sm:grid-cols-2">
+          {projects.map((p) => (
+            <Link
+              key={p.id}
+              href={`/projects/${p.id}`}
+              className="block rounded-card border border-edge bg-surface p-6 transition-colors hover:border-edge-strong"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="truncate text-sm font-semibold">{p.name}</h2>
+                <Badge>PG {p.pg_version}</Badge>
+              </div>
+              <div className="mt-3 flex items-center gap-2 text-sm text-fg-muted">
+                <StatusDot state={dotState(p.state)} />
+                {p.state}
+                <span className="text-fg-faint">·</span>
+                {p.region}
+              </div>
+            </Link>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

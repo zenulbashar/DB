@@ -1166,8 +1166,9 @@ components:
       description: >
         Lifecycle/compute state shared by branches and endpoints. `suspending`
         and `resuming` are transient scale-to-zero states the reconciler
-        converges (ADR-014).
-      enum: [provisioning, ready, suspending, suspended, resuming, error, deleting]
+        converges (ADR-014); `resizing` is the transient vertical-resize state
+        while the cluster is re-applied at a new compute size.
+      enum: [provisioning, ready, suspending, suspended, resuming, resizing, error, deleting]
 
     Compute:
       type: object
