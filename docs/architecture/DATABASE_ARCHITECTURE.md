@@ -127,12 +127,17 @@ The transitional state is the durable record, so both survive a reconciler resta
 in lockstep, and the route stays published (as `suspended`) throughout `suspending`/`resuming` so
 the gateway can hold and wake a connecting client.
 
-- **Suspend:** the gateway's per-endpoint connection counters detect no client connections for
-  `suspend_timeout` (default 300 s; disable-able on paid plans) → the control plane flips the branch
-  to `suspending` → the reconciler applies **CNPG hibernation** (`cnpg.io/hibernation` annotation:
-  clean shutdown, PVCs kept), **scales the pooler to 0**, and marks the branch `suspended`.
-  Suspended branches bill storage only. (The same suspend action is reused by the billing path —
-  MULTI_TENANCY §5 — not just idle detection.)
+- **Suspend:** every gateway reports its per-branch active-connection counts to the control plane
+  (`POST /internal/gateway-activity`); the **control plane** aggregates them across all replicas and
+  runs the idle decision — never a single gateway, which sees only its own connections (ADR-015). A
+  ready branch with `suspend_timeout_s > 0` is flipped to `suspending` only when the *globally*
+  summed active count is zero AND it has been idle for `suspend_timeout` (default 300 s;
+  `0` disables autosuspend, the paid-plan opt-out). The flip is **fail-safe** — it never fires when
+  no gateway is currently reporting, so reporting downtime cannot mass-suspend the fleet. The
+  reconciler then applies **CNPG hibernation** (`cnpg.io/hibernation` annotation: clean shutdown,
+  PVCs kept), **scales the pooler to 0**, and marks the branch `suspended`. Suspended branches bill
+  storage only. (The same `suspending` flip is reused by the billing path — MULTI_TENANCY §5 — not
+  just idle detection.)
 - **Wake:** the gateway holds the incoming connection and calls the control-plane **resume** action
   (`POST /branches/{br}/resume`), a coalesced, idempotent flip to `resuming`; the reconciler
   un-hibernates the cluster **and scales the pooler back up**, then marks the branch `ready` once

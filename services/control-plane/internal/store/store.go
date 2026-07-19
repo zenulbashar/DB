@@ -221,6 +221,11 @@ type Store interface {
 	// ErrConflict. Checkpoints/report/error patches ride along atomically.
 	TransitionImport(ctx context.Context, orgID, importID string, p TransitionImportParams) (*domain.Import, error)
 
+	// ReportGatewayActivity records a gateway replica's per-branch active
+	// connection counts for the suspend-on-idle decision (ADR-015). Privileged:
+	// the caller is the pg-gateway via the internal API, not a tenant.
+	ReportGatewayActivity(ctx context.Context, gatewayID string, counts map[string]int) error
+
 	AppendAudit(ctx context.Context, e domain.AuditEntry) error
 	ListAudit(ctx context.Context, orgID string, pg Page) ([]domain.AuditEntry, string, error)
 

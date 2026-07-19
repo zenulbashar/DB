@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -26,17 +27,27 @@ type Source interface {
 	FinishBranchTeardown(ctx context.Context, branchID string) error
 	CountLiveBranches(ctx context.Context, projectID string) (int, error)
 	ListRoutableEndpoints(ctx context.Context) ([]postgres.RoutableEndpoint, error)
+	// SweepIdleBranches flips globally-idle ready branches to suspending
+	// (ADR-015); staleWindow bounds which gateway activity reports still count.
+	SweepIdleBranches(ctx context.Context, staleWindow time.Duration) ([]string, error)
 }
 
+// defaultIdleStaleWindow bounds how recently a gateway must have reported for
+// its activity counts to be trusted by the idle sweep. It must exceed the
+// gateway report interval (default 15 s) by enough margin to tolerate a missed
+// report without falsely treating a busy gateway as gone.
+const defaultIdleStaleWindow = 60 * time.Second
+
 type Engine struct {
-	src    Source
-	kc     client.Client
-	backup *BackupConfig // nil disables archiving/backups (local dev only)
-	log    *slog.Logger
+	src             Source
+	kc              client.Client
+	backup          *BackupConfig // nil disables archiving/backups (local dev only)
+	log             *slog.Logger
+	idleStaleWindow time.Duration
 }
 
 func New(src Source, kc client.Client, backup *BackupConfig, log *slog.Logger) *Engine {
-	return &Engine{src: src, kc: kc, backup: backup, log: log}
+	return &Engine{src: src, kc: kc, backup: backup, log: log, idleStaleWindow: defaultIdleStaleWindow}
 }
 
 // Scheme returns a runtime.Scheme covering everything the engine touches —
@@ -55,6 +66,15 @@ func Scheme() *runtime.Scheme {
 // re-run after any partial failure — the crash-safety contract every phase
 // gate re-verifies (MASTER plan §7 "Everything reconciles").
 func (e *Engine) ReconcileOnce(ctx context.Context) error {
+	// Flip globally-idle branches to suspending first, so this same pass picks
+	// them up and hibernates them (ADR-015). Best-effort: a sweep failure is
+	// logged but must not block convergence of everything else.
+	if ids, err := e.src.SweepIdleBranches(ctx, e.idleStaleWindow); err != nil {
+		e.log.Error("idle sweep", "err", err)
+	} else if len(ids) > 0 {
+		e.log.Info("idle branches flipped to suspending", "count", len(ids))
+	}
+
 	work, err := e.src.ListReconcileWork(ctx)
 	if err != nil {
 		return fmt.Errorf("list work: %w", err)

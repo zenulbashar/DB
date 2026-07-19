@@ -95,7 +95,11 @@ type Server struct {
 	log    *slog.Logger
 	m      *Metrics
 	countM sync.Mutex
-	counts map[string]int
+	counts map[string]int // per-endpoint (feeds the per-endpoint connection cap)
+	// branchActive is the per-branch active connection count this gateway sees;
+	// it is reported to the control plane for the suspend-on-idle decision
+	// (ADR-015). Aggregation across gateway replicas happens control-plane-side.
+	branchActive map[string]int
 }
 
 func New(cfg Config, table RouteTable, m *Metrics, log *slog.Logger) *Server {
@@ -108,7 +112,8 @@ func New(cfg Config, table RouteTable, m *Metrics, log *slog.Logger) *Server {
 	if cfg.WakePoll == 0 {
 		cfg.WakePoll = 500 * time.Millisecond
 	}
-	return &Server{cfg: cfg, table: table, log: log, m: m, counts: map[string]int{}}
+	return &Server{cfg: cfg, table: table, log: log, m: m,
+		counts: map[string]int{}, branchActive: map[string]int{}}
 }
 
 // Serve accepts connections until the listener closes or ctx is done.
@@ -202,12 +207,12 @@ func (s *Server) handle(ctx context.Context, raw net.Conn) {
 		}
 		route = ready
 	}
-	if !s.acquire(endpointID, route.MaxConns) {
+	if !s.acquire(endpointID, route.BranchID, route.MaxConns) {
 		s.fail(client, "too-many-connections", "53300",
 			"too many connections for this endpoint")
 		return
 	}
-	defer s.release(endpointID)
+	defer s.release(endpointID, route.BranchID)
 
 	backend, err := net.DialTimeout("tcp", route.Backend, s.cfg.DialTimeout)
 	if err != nil {
@@ -296,21 +301,69 @@ func (s *Server) pipe(client, backend net.Conn, endpointID string) {
 	<-done
 }
 
-func (s *Server) acquire(endpointID string, max int) bool {
+func (s *Server) acquire(endpointID, branchID string, max int) bool {
 	s.countM.Lock()
 	defer s.countM.Unlock()
 	if max > 0 && s.counts[endpointID] >= max {
 		return false
 	}
 	s.counts[endpointID]++
+	if branchID != "" {
+		s.branchActive[branchID]++
+	}
 	return true
 }
 
-func (s *Server) release(endpointID string) {
+func (s *Server) release(endpointID, branchID string) {
 	s.countM.Lock()
 	defer s.countM.Unlock()
 	if s.counts[endpointID] > 0 {
 		s.counts[endpointID]--
+	}
+	if branchID != "" && s.branchActive[branchID] > 0 {
+		s.branchActive[branchID]--
+	}
+}
+
+// BranchActivity snapshots the current per-branch active connection counts for
+// reporting to the control plane (suspend-on-idle, ADR-015).
+func (s *Server) BranchActivity() map[string]int {
+	s.countM.Lock()
+	defer s.countM.Unlock()
+	out := make(map[string]int, len(s.branchActive))
+	for k, v := range s.branchActive {
+		out[k] = v
+	}
+	return out
+}
+
+// RunActivityReporter periodically reports this gateway's per-branch active
+// connection counts to the control plane so it can drive the suspend-on-idle
+// decision (ADR-015). Blocks until ctx is done. A nil reporter is a no-op.
+func (s *Server) RunActivityReporter(ctx context.Context, reporter wake.Reporter, gatewayID string, interval time.Duration) {
+	if reporter == nil {
+		return
+	}
+	if interval <= 0 {
+		interval = 15 * time.Second
+	}
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			counts := s.BranchActivity()
+			if len(counts) == 0 {
+				continue
+			}
+			rctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			if err := reporter.Report(rctx, gatewayID, counts); err != nil && s.log != nil {
+				s.log.Warn("activity report failed", "err", err)
+			}
+			cancel()
+		}
 	}
 }
 

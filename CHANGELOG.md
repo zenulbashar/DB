@@ -2,6 +2,39 @@
 
 All notable changes to this repository. Format loosely follows [Keep a Changelog](https://keepachangelog.com/); one entry per phase gate plus notable intermediate merges.
 
+## [Phase 4 — suspend-on-idle] — 2026-07-19
+
+Closes the automatic scale-to-zero loop: idle branches now hibernate on their own (the wake half
+shipped in the three prior increments). ADR-015.
+
+### Decided (ADR-015)
+- The suspend decision is made by the **control plane** from gateway-reported activity **aggregated
+  across all gateway replicas** — never by a single gateway, which sees only its own connections and
+  would otherwise kill another replica's live connections. The sweep is **fail-safe**: it never
+  suspends when no gateway is currently reporting, so reporting downtime can't mass-suspend the fleet.
+
+### Added
+- **Gateway activity reporting** — each gateway tracks per-branch active connection counts and
+  periodically POSTs them to the control-plane's `POST /internal/gateway-activity` (same
+  `NDB_GATEWAY_TOKEN` auth as wake). `PGGW_CONTROL_PLANE_URL`/`PGGW_GATEWAY_TOKEN` enable it;
+  `PGGW_GATEWAY_ID` (hostname default) and `PGGW_ACTIVITY_INTERVAL` (default 15 s) tune it.
+- **Control-plane aggregation + idle sweep** — a `branch_activity(branch_id, gateway_id,
+  active_conns, reported_at)` telemetry table and `branches.last_active_at` (migration `0008`).
+  `ReportGatewayActivity` upserts a gateway's counts and bumps `last_active_at` on observed activity;
+  `MarkBranchReady`/`MarkBranchResumed` seed `last_active_at` so a freshly-ready branch gets a full
+  grace period. `SweepIdleBranches` (run each reconcile pass) flips a ready branch to `suspending`
+  only when its globally-summed active count is 0 AND it's been idle past `suspend_timeout_s` —
+  and only while at least one gateway is recently reporting. `suspend_timeout_s = 0` disables
+  autosuspend (paid-plan opt-out); the threshold lives entirely control-plane-side, so the gateway
+  reports raw counts and needs no knowledge of it.
+
+### Tests
+- Store: `ReportGatewayActivity` aggregation across gateways, `last_active_at` seeding, and
+  `SweepIdleBranches` (suspends a globally-idle branch past its timeout; does NOT suspend one with
+  activity on another gateway, one within its grace period, one with `suspend_timeout_s = 0`, or any
+  branch when no gateway is reporting). Server: the `/internal/gateway-activity` endpoint (auth +
+  disabled without the token). Gateway: per-branch counting and the reporter loop.
+
 ## [Phase 4 — gateway hold-and-wake] — 2026-07-18
 
 Scale-to-zero wake-on-connect goes live end to end (ADR-014): the pg-gateway now **holds** a

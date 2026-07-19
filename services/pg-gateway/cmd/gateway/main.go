@@ -49,15 +49,26 @@ func main() {
 	// and the shared gateway token are configured; otherwise suspended endpoints
 	// are cleanly rejected as before.
 	var waker wake.Waker
+	var reporter wake.Reporter
 	cpURL := os.Getenv("PGGW_CONTROL_PLANE_URL")
 	gwToken := os.Getenv("PGGW_GATEWAY_TOKEN")
 	wakeTimeout := getdur("PGGW_WAKE_TIMEOUT", 30*time.Second)
 	if cpURL != "" && gwToken != "" {
 		waker = wake.NewHTTP(cpURL, gwToken, 10*time.Second)
-		log.Info("wake-on-connect enabled", "control_plane", cpURL, "wake_timeout", wakeTimeout)
+		reporter = wake.NewHTTPReporter(cpURL, gwToken, 10*time.Second)
+		log.Info("wake-on-connect + activity reporting enabled", "control_plane", cpURL, "wake_timeout", wakeTimeout)
 	} else {
 		log.Info("wake-on-connect disabled (set PGGW_CONTROL_PLANE_URL and PGGW_GATEWAY_TOKEN to enable)")
 	}
+	gatewayID := os.Getenv("PGGW_GATEWAY_ID")
+	if gatewayID == "" {
+		if h, err := os.Hostname(); err == nil {
+			gatewayID = h
+		} else {
+			gatewayID = "gateway"
+		}
+	}
+	activityInterval := getdur("PGGW_ACTIVITY_INTERVAL", 15*time.Second)
 
 	reg := prometheus.NewRegistry()
 	m := proxy.NewMetrics(reg)
@@ -69,6 +80,10 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// Report per-branch activity so the control plane can suspend idle branches
+	// (ADR-015). No-op when reporting is disabled.
+	go srv.RunActivityReporter(ctx, reporter, gatewayID, activityInterval)
 
 	go func() {
 		mux := http.NewServeMux()

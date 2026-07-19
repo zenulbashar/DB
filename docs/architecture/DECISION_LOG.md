@@ -137,6 +137,38 @@ SECURITY_MODEL §3) and disabled when the token is unset. The route table gains 
 so the gateway knows which branch to wake for a connecting endpoint. This increment adds the
 endpoint + route field; the gateway-side hold/coalesce/poll logic is the next increment.
 
+## ADR-015 · Suspend-on-idle is decided by the control plane from gateway-reported activity, aggregated across all gateway replicas, and is fail-safe — `accepted`
+**Context:** Scale-to-zero's *suspend* half needs to detect that a branch is idle and flip it
+`ready → suspending` (ADR-014's state machine then hibernates it). The obvious source is the
+gateway's per-endpoint connection counters — but the gateway runs as **multiple replicas**
+(DEPLOYMENT §3: 3 nodes behind one L4 LB). Any single gateway sees only *its own* connections, so a
+gateway that suspended a branch based on its local view would kill live connections held by a
+*different* gateway. Wake tolerates redundant triggers; suspend does not — a wrong suspend is a
+data-plane outage for that tenant.
+**Decision:** the suspend decision is made by the **control plane**, never by a gateway. Each
+gateway periodically reports its per-branch active-connection counts to a privileged internal
+endpoint `POST /internal/gateway-activity` (same `NDB_GATEWAY_TOKEN` auth as wake). The control
+plane stores them per `(branch, gateway)` in a `branch_activity` telemetry table and maintains
+`branches.last_active_at` (bumped whenever any gateway reports activity, and set when a branch
+becomes ready/resumes — so a freshly-ready branch gets a full grace period). An idle sweep runs in
+the reconciler loop: a ready branch with `suspend_timeout_s > 0` is flipped to `suspending` only
+when its **globally aggregated** active count (summed across all *recently-reporting* gateways) is
+zero AND `last_active_at` is older than its `suspend_timeout`. The sweep is **fail-safe**: if *no*
+gateway has reported within the staleness window it does nothing at all — the platform never
+mass-suspends when activity reporting is down, undeployed, or a gateway has just started. Stale
+reports (from a crashed/rolled gateway) age out of the aggregation window and are ignored.
+**Alternatives:** gateway-unilateral suspend (rejected — unsafe under multiple replicas, the core
+reason for this ADR); reconciler polling every tenant's `pg_stat_activity` (rejected — needs
+per-tenant DB credentials + a connection to every cluster each interval, heavy and couples the
+control plane to the data path); a shared cache (Redis) of activity (deferred — the control-plane
+DB is already the aggregation point and avoids a new dependency).
+**Consequences:** suspend latency is bounded by the report interval + reconcile interval (tens of
+seconds), which is fine — idleness is measured in minutes. `suspend_timeout_s = 0` disables
+autosuspend for a branch (paid-plan opt-out, MIGRATION_STRATEGY/DATABASE_ARCHITECTURE §7). The
+`branch_activity` table is ephemeral telemetry (no FK, orphan rows are harmless and ignored by the
+ready-only sweep). This reuses the gateway↔control-plane auth + the ADR-014 state machine; the only
+new privileged mutation is the idle `ready → suspending` flip performed inside the reconciler.
+
 ---
 
 ## Open questions — **all answered by owner, 2026-07-17**

@@ -157,6 +157,24 @@ func (s *Store) ResumeBranch(_ context.Context, orgID, branchID string) (*domain
 		domain.StateResuming, domain.StateReady)
 }
 
+// ReportGatewayActivity records a gateway's per-branch counts (ADR-015). The
+// memory store keeps only the last report per gateway (the postgres store owns
+// the real cross-gateway aggregation + idle sweep); this satisfies the Store
+// interface for handler tests.
+func (s *Store) ReportGatewayActivity(_ context.Context, gatewayID string, counts map[string]int) error {
+	if gatewayID == "" || len(counts) == 0 {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	m := map[string]int{}
+	for k, v := range counts {
+		m[k] = v
+	}
+	s.gwActivity[gatewayID] = m
+	return nil
+}
+
 // WakeBranchByID resolves the branch's org, then reuses ResumeBranch (mirrors
 // the postgres store; the privileged cross-tenant wake path — ADR-014).
 func (s *Store) WakeBranchByID(ctx context.Context, branchID string) (*domain.Branch, error) {

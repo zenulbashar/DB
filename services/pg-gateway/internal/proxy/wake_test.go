@@ -163,6 +163,77 @@ func TestHoldAndWakeFailsWhenWakeErrors(t *testing.T) {
 	}
 }
 
+func TestBranchActivityCounting(t *testing.T) {
+	s := testServer(t, Config{}, &fakeTable{m: map[string]routes.Route{}})
+	s.acquire("ep_a", "br_1", 0)
+	s.acquire("ep_b", "br_1", 0)
+	s.acquire("ep_c", "br_2", 0)
+	act := s.BranchActivity()
+	if act["br_1"] != 2 || act["br_2"] != 1 {
+		t.Fatalf("branch activity = %v, want br_1:2 br_2:1", act)
+	}
+	s.release("ep_a", "br_1")
+	if s.BranchActivity()["br_1"] != 1 {
+		t.Fatalf("br_1 after release = %d, want 1", s.BranchActivity()["br_1"])
+	}
+	// Endpoints without a branch id are not tracked (old reconciler / no wake).
+	s.acquire("ep_d", "", 0)
+	if _, ok := s.BranchActivity()[""]; ok {
+		t.Fatal("empty branch id must not be tracked")
+	}
+}
+
+type recordReporter struct {
+	mu   sync.Mutex
+	gwID string
+	last map[string]int
+	n    int
+}
+
+func (r *recordReporter) Report(_ context.Context, gwID string, counts map[string]int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.gwID, r.last, r.n = gwID, counts, r.n+1
+	return nil
+}
+func (r *recordReporter) calls() int { r.mu.Lock(); defer r.mu.Unlock(); return r.n }
+
+func TestActivityReporterReports(t *testing.T) {
+	s := testServer(t, Config{}, &fakeTable{m: map[string]routes.Route{}})
+	s.acquire("ep_a", "br_1", 0)
+
+	rep := &recordReporter{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go s.RunActivityReporter(ctx, rep, "gw-test", 10*time.Millisecond)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for rep.calls() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("reporter never fired")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	rep.mu.Lock()
+	gw, last := rep.gwID, rep.last
+	rep.mu.Unlock()
+	if gw != "gw-test" || last["br_1"] != 1 {
+		t.Fatalf("report gw=%s counts=%v, want gw-test br_1:1", gw, last)
+	}
+}
+
+func TestActivityReporterNilIsNoop(t *testing.T) {
+	s := testServer(t, Config{}, &fakeTable{m: map[string]routes.Route{}})
+	// A nil reporter returns immediately (does not block).
+	done := make(chan struct{})
+	go func() { s.RunActivityReporter(context.Background(), nil, "gw", time.Second); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("nil reporter should return immediately")
+	}
+}
+
 func TestHoldAndWakeStopsOnContextCancel(t *testing.T) {
 	ft := &fakeTable{m: map[string]routes.Route{
 		"ep_1": {State: routes.StateSuspended, BranchID: "br_1"},

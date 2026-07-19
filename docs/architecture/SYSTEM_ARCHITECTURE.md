@@ -131,11 +131,13 @@ The trigger is a **desired-state flip on the branch**, not an imperative RPC (AD
 wake are transitional states (`suspending`, `resuming`) the reconciler converges, exactly like
 provisioning/teardown — so a wake survives a reconciler restart.
 
-1. **Suspend (idle):** gateway connection counters report a branch idle > its `suspend_timeout`
-   (default 5 min, per-plan) → the control plane flips the branch `ready → suspending` → the
-   reconciler applies CNPG hibernation (Postgres shut down cleanly; PVCs retained) and scales the
-   pooler to zero, then marks it `suspended`. Endpoints move in lockstep; the route stays published
-   (marked `suspended`) so the gateway can still hold and wake a connecting client.
+1. **Suspend (idle):** every gateway reports its per-branch active-connection counts to the control
+   plane, which **aggregates across all replicas** and — fail-safe, only while reporting is live —
+   flips a branch `ready → suspending` once its global active count is zero and it has been idle past
+   its `suspend_timeout` (default 5 min, per-plan; ADR-015). The reconciler then applies CNPG
+   hibernation (Postgres shut down cleanly; PVCs retained) and scales the pooler to zero, then marks
+   it `suspended`. Endpoints move in lockstep; the route stays published (marked `suspended`) so the
+   gateway can still hold and wake a connecting client.
 2. **Wake (on connect):** a new connection arrives at the gateway → the route entry is `suspended`
    → the gateway holds the TCP connection (client sees normal connect latency) and calls the
    control-plane API's **resume** action, which flips `suspended → resuming`. The call is
