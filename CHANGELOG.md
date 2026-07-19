@@ -2,6 +2,30 @@
 
 All notable changes to this repository. Format loosely follows [Keep a Changelog](https://keepachangelog.com/); one entry per phase gate plus notable intermediate merges.
 
+## [Phase 3 — console end-to-end verification + smoke harness] — 2026-07-19
+
+The three console increments (read surface, branch management, project creation) were verified
+against a **real running stack** — not just compile/build — and that verification was made
+reproducible.
+
+### Verified (live)
+- Stood up Postgres + the control-plane API (migrations auto-applied) + the console. Bootstrapped a
+  platform, created projects via the API, and confirmed the **console renders the live data**:
+  dashboard lists the projects, the detail page shows the seeded `main` branch with its endpoints and
+  a **masked** connection string (`roster_owner:****@…`), the auth guard 307-redirects without a
+  session, and a bad project id renders the 404 page.
+- **Write path** exercised through a real browser (Playwright/Chromium): submitting the console's
+  "New branch" form created a branch (`feature-x`) via the server action → control plane, which
+  persisted with the correct parent and rendered on the revalidated page. The mutations appear in the
+  audit log (`branch.create`, `project.create`).
+
+### Added
+- `tools/smoke-e2e.sh` + `make smoke` — reproducible end-to-end smoke test: build/run the
+  control-plane, bootstrap, create a project via the API, then assert the console renders that live
+  data (and redirects without a session). Needs a fresh `DATABASE_URL`; no Docker or k8s required.
+- README: corrected the stale "Phase 0 — planning" status to reflect Phases 1–4, and added a
+  **Local development** section (`make dev` / `console-dev` / `test` / `smoke`).
+
 ## [Phase 3 — console: project creation + one-time credential reveal] — 2026-07-19
 
 Projects can now be created from the console — the last piece needed to go from zero to a

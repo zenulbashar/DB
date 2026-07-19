@@ -4,8 +4,13 @@ A multi-tenant managed/serverless PostgreSQL platform (Neon-class) that integrat
 [Nimbus hosting platform](https://github.com/zenulbashar/hosting), built to first migrate
 **Prompt2Eat** and **Roster** off Neon, then onboard external tenants.
 
-> **Status: Phase 0 — planning.** No production code exists yet, by design.
-> Implementation begins only after the architecture plan below is approved.
+> **Status: Phases 1–4 implemented; Phase 3 console in progress.** The control-plane API,
+> pg-gateway, reconciler/CNPG provisioning, envelope secrets, backup/recovery, the import engine,
+> and the elastic-compute mechanisms (scale-to-zero wake/suspend, read replicas, branching, vertical
+> resize) are built and tested. The console reads live control-plane data and can connect, create
+> projects, and manage branches (`make smoke` verifies this end-to-end). Phases 5–8 (Temporal-driven
+> imports at scale, Nimbus integration, billing, multi-region) are gated on external systems. See the
+> [CHANGELOG](CHANGELOG.md) and [ROADMAP](docs/architecture/ROADMAP.md) for exact state.
 
 ## Architecture documentation (source of truth)
 
@@ -25,6 +30,24 @@ Start here: [`docs/architecture/MASTER_IMPLEMENTATION_PLAN.md`](docs/architectur
 | [RISK_REGISTER](docs/architecture/RISK_REGISTER.md) | Ranked risks and mitigations |
 | [MIGRATION_STRATEGY](docs/architecture/MIGRATION_STRATEGY.md) | Import engine + Roster/Prompt2Eat cutover runbooks |
 | [DECISION_LOG](docs/architecture/DECISION_LOG.md) | ADRs and open questions for the owner |
+
+## Local development
+
+Prerequisites: Go, Node, and a Postgres for the control plane (docker-compose provides one with the
+non-superuser `ndb_app` role that RLS requires).
+
+```sh
+make dev-db        # start local control-plane Postgres (docker compose, :5433)
+make dev           # run the control-plane API (auto-migrates) against it
+make console-dev   # run the Next.js console (expects the API at NDB_API_URL, default :8080/v1)
+make test          # unit tests across all Go modules (no external deps)
+make smoke         # end-to-end: bootstrap + create a project via the API, then assert the
+                   # console renders that live data. Needs a FRESH DATABASE_URL, e.g.:
+                   #   DATABASE_URL=postgres://ndb_app:ndb_app@localhost:5433/nimbusdb_cp?sslmode=disable make smoke
+```
+
+The data plane (per-tenant Postgres clusters) needs a `kind` cluster with CloudNativePG — see
+`tools/dev-up.sh`. The control plane, console, and import engine run without it.
 
 ## Rules of the repo
 
