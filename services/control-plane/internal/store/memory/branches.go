@@ -223,6 +223,28 @@ func (s *Store) transitionBranchState(orgID, branchID string,
 	return &b, nil
 }
 
+func (s *Store) CreateEndpoint(_ context.Context, orgID, branchID string, kind domain.EndpointKind) (*domain.Endpoint, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	b, ok := s.branches[branchID]
+	if !ok || b.OrgID != orgID || b.State == domain.StateDeleting {
+		return nil, store.ErrNotFound
+	}
+	for _, ep := range s.endpoints {
+		if ep.BranchID == branchID && ep.Kind == kind && ep.State != domain.StateDeleting {
+			return nil, store.ErrConflict
+		}
+	}
+	pr := s.projects[b.ProjectID]
+	ep := domain.Endpoint{
+		ID: ids.New(ids.Endpoint), BranchID: branchID, OrgID: orgID, Kind: kind,
+		State: domain.StateProvisioning, CreatedAt: time.Now().UTC(),
+	}
+	ep.Host = domain.EndpointHost(ep.ID, pr.Region)
+	s.endpoints[ep.ID] = ep
+	return &ep, nil
+}
+
 func (s *Store) ListEndpoints(_ context.Context, orgID, branchID string) ([]domain.Endpoint, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

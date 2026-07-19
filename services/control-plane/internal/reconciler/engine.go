@@ -24,6 +24,9 @@ type Source interface {
 	MarkBranchReady(ctx context.Context, branchID string) error
 	MarkBranchSuspended(ctx context.Context, branchID string) error
 	MarkBranchResumed(ctx context.Context, branchID string) error
+	// MarkEndpointsReady flips a ready branch's newly-provisioned endpoints
+	// (e.g. an added read endpoint) to ready.
+	MarkEndpointsReady(ctx context.Context, branchID string) error
 	FinishBranchTeardown(ctx context.Context, branchID string) error
 	CountLiveBranches(ctx context.Context, projectID string) (int, error)
 	ListRoutableEndpoints(ctx context.Context) ([]postgres.RoutableEndpoint, error)
@@ -95,6 +98,10 @@ func (e *Engine) ReconcileOnce(ctx context.Context) error {
 			keep(e.suspend(ctx, w))
 		case domain.StateResuming:
 			keep(e.resume(ctx, w))
+		case domain.StateReady:
+			// A ready branch is work only when it has a newly-added endpoint to
+			// provision (widened ListReconcileWork) — e.g. a read endpoint.
+			keep(e.reconcileEndpoints(ctx, w))
 		}
 	}
 	keep(e.publishRoutes(ctx))
@@ -105,6 +112,9 @@ func (e *Engine) provision(ctx context.Context, w postgres.BranchWork) error {
 	objs := []*unstructured.Unstructured{BuildNamespace(w), BuildResourceQuota(w)}
 	objs = append(objs, BuildNetworkPolicies(w)...)
 	objs = append(objs, BuildCluster(w, e.backup), BuildPooler(w))
+	if hasReadEndpoint(w) {
+		objs = append(objs, BuildROPooler(w))
+	}
 	if e.backup != nil {
 		objs = append(objs, BuildScheduledBackup(w))
 	}
@@ -175,6 +185,34 @@ func (e *Engine) resume(ctx context.Context, w postgres.BranchWork) error {
 	return nil
 }
 
+// reconcileEndpoints converges a ready branch whose endpoint set changed (a
+// read endpoint was added): it re-applies the cluster (a read endpoint scales
+// it to a 2-instance primary+replica) and the pooler(s), then marks the new
+// endpoints ready once the cluster is healthy. Non-disruptive — the branch
+// stays ready throughout; only the new endpoint moves provisioning → ready.
+func (e *Engine) reconcileEndpoints(ctx context.Context, w postgres.BranchWork) error {
+	objs := []*unstructured.Unstructured{BuildCluster(w, e.backup), BuildPooler(w)}
+	if hasReadEndpoint(w) {
+		objs = append(objs, BuildROPooler(w))
+	}
+	for _, o := range objs {
+		if err := e.ensure(ctx, o); err != nil {
+			return fmt.Errorf("ensure %s/%s: %w", o.GetKind(), o.GetName(), err)
+		}
+	}
+	ready, err := e.clusterReady(ctx, w)
+	if err != nil {
+		return err
+	}
+	if ready {
+		if err := e.src.MarkEndpointsReady(ctx, w.Branch.ID); err != nil {
+			return err
+		}
+		e.log.Info("branch endpoints ready", "branch", w.Branch.ID, "project", w.ProjectID)
+	}
+	return nil
+}
+
 func (e *Engine) teardown(ctx context.Context, w postgres.BranchWork) error {
 	ns := NamespaceName(w.ProjectID)
 	for _, ref := range []struct {
@@ -182,6 +220,7 @@ func (e *Engine) teardown(ctx context.Context, w postgres.BranchWork) error {
 		name string
 	}{
 		{ScheduledBackupGVK, ClusterName(w.Branch.ID) + "-nightly"},
+		{PoolerGVK, ROPoolerName(w.Branch.ID)},
 		{PoolerGVK, PoolerName(w.Branch.ID)},
 		{ClusterGVK, ClusterName(w.Branch.ID)},
 	} {

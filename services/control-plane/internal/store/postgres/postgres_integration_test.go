@@ -533,6 +533,74 @@ func TestSuspendResumeFlow(t *testing.T) {
 	}
 }
 
+func TestCreateReadEndpoint(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	res := bootstrapOrg(t, s, "acme")
+	pr, err := s.CreateProject(ctx, store.CreateProjectParams{OrgID: res.Org.ID, Name: "App", Region: "syd1", PGVersion: 17})
+	if err != nil {
+		t.Fatal(err)
+	}
+	brID := *pr.DefaultBranchID
+	if err := s.MarkBranchReady(ctx, brID); err != nil {
+		t.Fatal(err)
+	}
+
+	// Add a read endpoint — starts provisioning.
+	ep, err := s.CreateEndpoint(ctx, res.Org.ID, brID, domain.EndpointROPooled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ep.Kind != domain.EndpointROPooled || ep.State != domain.StateProvisioning {
+		t.Fatalf("endpoint = %+v, want ro_pooled/provisioning", ep)
+	}
+	// Duplicate kind → conflict; missing branch → not found.
+	if _, err := s.CreateEndpoint(ctx, res.Org.ID, brID, domain.EndpointROPooled); err != store.ErrConflict {
+		t.Fatalf("duplicate ro endpoint = %v, want conflict", err)
+	}
+	if _, err := s.CreateEndpoint(ctx, res.Org.ID, "br_nope", domain.EndpointROPooled); err != store.ErrNotFound {
+		t.Fatalf("endpoint on unknown branch = %v, want not found", err)
+	}
+
+	// The ready branch now surfaces as reconcile work (it has a provisioning
+	// endpoint) even though its own state is ready.
+	work, _ := s.ListReconcileWork(ctx)
+	found := false
+	for _, w := range work {
+		if w.Branch.ID == brID && w.Branch.State == domain.StateReady {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("ready branch with a pending endpoint not returned as work: %+v", work)
+	}
+	// A provisioning endpoint is not yet routable (only the 2 ready rw ones are).
+	if routable, _ := s.ListRoutableEndpoints(ctx); len(routable) != 2 {
+		t.Fatalf("routable = %d, want 2 (ro endpoint still provisioning)", len(routable))
+	}
+
+	// The reconciler marks it ready; now all three route and the work drains.
+	if err := s.MarkEndpointsReady(ctx, brID); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := s.GetBranch(ctx, res.Org.ID, brID)
+	roReady := false
+	for _, e := range b.Endpoints {
+		if e.Kind == domain.EndpointROPooled {
+			roReady = e.State == domain.StateReady
+		}
+	}
+	if !roReady {
+		t.Fatalf("ro endpoint not ready after MarkEndpointsReady: %+v", b.Endpoints)
+	}
+	if routable, _ := s.ListRoutableEndpoints(ctx); len(routable) != 3 {
+		t.Fatalf("routable = %d, want 3 after read endpoint ready", len(routable))
+	}
+	if work, _ := s.ListReconcileWork(ctx); len(work) != 0 {
+		t.Fatalf("work not drained after endpoints ready: %+v", work)
+	}
+}
+
 func TestSuspendOnIdle(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()

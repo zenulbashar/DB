@@ -332,6 +332,49 @@ func listEndpointsTx(ctx context.Context, tx pgx.Tx, branchID string) ([]domain.
 	return out, rows.Err()
 }
 
+// CreateEndpoint adds an endpoint of the given kind to a branch (read replica
+// support). It is created in provisioning state; the reconciler picks the
+// ready branch up (widened ListReconcileWork), builds the backing pooler +
+// replica, and marks the endpoint ready.
+func (s *Store) CreateEndpoint(ctx context.Context, orgID, branchID string, kind domain.EndpointKind) (*domain.Endpoint, error) {
+	var ep domain.Endpoint
+	err := s.withOrgTx(ctx, orgID, func(tx pgx.Tx) error {
+		var region string
+		err := tx.QueryRow(ctx,
+			`SELECT p.region FROM branches b JOIN projects p ON p.id = b.project_id
+			  WHERE b.id = $1 AND b.org_id = $2 AND b.state <> 'deleting'`, branchID, orgID).Scan(&region)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return store.ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		var dup bool
+		if err := tx.QueryRow(ctx,
+			`SELECT EXISTS (SELECT 1 FROM endpoints WHERE branch_id = $1 AND kind = $2 AND state <> 'deleting')`,
+			branchID, kind).Scan(&dup); err != nil {
+			return err
+		}
+		if dup {
+			return store.ErrConflict
+		}
+		ep = domain.Endpoint{
+			ID: ids.New(ids.Endpoint), BranchID: branchID, OrgID: orgID, Kind: kind,
+			State: domain.StateProvisioning, CreatedAt: time.Now().UTC(),
+		}
+		ep.Host = domain.EndpointHost(ep.ID, region)
+		_, err = tx.Exec(ctx,
+			`INSERT INTO endpoints (id, branch_id, org_id, kind, host, state, created_at)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+			ep.ID, ep.BranchID, ep.OrgID, ep.Kind, ep.Host, ep.State, ep.CreatedAt)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &ep, nil
+}
+
 func (s *Store) ListEndpoints(ctx context.Context, orgID, branchID string) ([]domain.Endpoint, error) {
 	var out []domain.Endpoint
 	err := s.withOrgTx(ctx, orgID, func(tx pgx.Tx) error {

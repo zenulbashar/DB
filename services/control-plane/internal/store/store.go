@@ -199,6 +199,11 @@ type Store interface {
 	// ResumeBranch. ErrNotFound for a missing/deleting branch.
 	WakeBranchByID(ctx context.Context, branchID string) (*domain.Branch, error)
 	ListEndpoints(ctx context.Context, orgID, branchID string) ([]domain.Endpoint, error)
+	// CreateEndpoint adds an endpoint (e.g. a read replica ro_pooled) to a
+	// branch in provisioning state; the reconciler builds its backing resources
+	// and marks it ready. ErrConflict if an endpoint of that kind already
+	// exists; ErrNotFound for a missing/deleting branch.
+	CreateEndpoint(ctx context.Context, orgID, branchID string, kind domain.EndpointKind) (*domain.Endpoint, error)
 
 	CreateDBRole(ctx context.Context, p CreateDBRoleParams) (*domain.DBRole, error)
 	ListDBRoles(ctx context.Context, orgID, branchID string) ([]domain.DBRole, error)
