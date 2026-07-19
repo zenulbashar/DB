@@ -4,6 +4,10 @@
  * follow the design-handoff state catalogue. Grows with Phase 3.
  */
 import type { ReactNode } from "react";
+import Link from "next/link";
+
+const buttonBase =
+  "inline-flex items-center justify-center gap-2 rounded-control font-medium transition-colors";
 
 const buttonVariants = {
   primary:
@@ -35,13 +39,35 @@ export function Button({
 } & React.ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
     <button
-      className={`inline-flex items-center justify-center gap-2 rounded-control font-medium transition-colors ${buttonVariants[variant]} ${buttonSizes[size]}`}
+      className={`${buttonBase} ${buttonVariants[variant]} ${buttonSizes[size]}`}
       disabled={disabled || loading}
       {...rest}
     >
       {loading && <Spinner />}
       {children}
     </button>
+  );
+}
+
+// Link styled as a button (client-side nav). Avoids nesting <button> in <a>.
+export function ButtonLink({
+  href,
+  variant = "primary",
+  size = "md",
+  children,
+}: {
+  href: string;
+  variant?: keyof typeof buttonVariants;
+  size?: keyof typeof buttonSizes;
+  children: ReactNode;
+}) {
+  return (
+    <Link
+      href={href}
+      className={`${buttonBase} ${buttonVariants[variant]} ${buttonSizes[size]}`}
+    >
+      {children}
+    </Link>
   );
 }
 
