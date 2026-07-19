@@ -533,6 +533,79 @@ func TestSuspendResumeFlow(t *testing.T) {
 	}
 }
 
+func TestResizeBranch(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	res := bootstrapOrg(t, s, "acme")
+	pr, err := s.CreateProject(ctx, store.CreateProjectParams{OrgID: res.Org.ID, Name: "App", Region: "syd1", PGVersion: 17})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A production branch has min 0.25 / max ... use a custom-bounds branch.
+	br, err := s.CreateBranch(ctx, store.CreateBranchParams{
+		OrgID: res.Org.ID, ProjectID: pr.ID, Name: "svc", Role: domain.BranchDevelopment,
+		Compute: domain.Compute{MinCU: 0.5, MaxCU: 4},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkBranchReady(ctx, br.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	// Resize to 2 CU → resizing, current_cu = 2.
+	b, err := s.ResizeBranch(ctx, res.Org.ID, br.ID, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.State != domain.StateResizing || b.Compute.CurrentCU != 2 {
+		t.Fatalf("after resize: state=%s current_cu=%v, want resizing/2", b.State, b.Compute.CurrentCU)
+	}
+	// The reconciler sees resizing work carrying the new size.
+	work, _ := s.ListReconcileWork(ctx)
+	var seen float64
+	for _, w := range work {
+		if w.Branch.ID == br.ID {
+			seen = w.Branch.Compute.CurrentCU
+		}
+	}
+	if seen != 2 {
+		t.Fatalf("reconcile-work current_cu = %v, want 2", seen)
+	}
+	// Route stays up during resize.
+	if routable, _ := s.ListRoutableEndpoints(ctx); len(routable) != 2 {
+		t.Fatalf("resizing branch endpoints must stay routable, got %d", len(routable))
+	}
+
+	// Reconciler completes the resize.
+	if err := s.MarkBranchResized(ctx, br.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.GetBranch(ctx, res.Org.ID, br.ID)
+	if got.State != domain.StateReady || got.Compute.CurrentCU != 2 {
+		t.Fatalf("after resized: state=%s current_cu=%v", got.State, got.Compute.CurrentCU)
+	}
+
+	// Clamping: a target above max is clamped to max (4); idempotent at same size.
+	b, err = s.ResizeBranch(ctx, res.Org.ID, br.ID, 99)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.Compute.CurrentCU != 4 {
+		t.Fatalf("resize to 99 clamped to %v, want 4 (max)", b.Compute.CurrentCU)
+	}
+	if err := s.MarkBranchResized(ctx, br.ID); err != nil {
+		t.Fatal(err)
+	}
+	// Resizing a suspended branch is a conflict.
+	if _, err := s.SuspendBranch(ctx, res.Org.ID, br.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ResizeBranch(ctx, res.Org.ID, br.ID, 1); err != store.ErrConflict {
+		t.Fatalf("resize while suspending = %v, want conflict", err)
+	}
+}
+
 func TestBranchBootstrapAtPersists(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()

@@ -223,6 +223,35 @@ func (s *Store) transitionBranchState(orgID, branchID string,
 	return &b, nil
 }
 
+func (s *Store) ResizeBranch(_ context.Context, orgID, branchID string, targetCU float64) (*domain.Branch, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	b, ok := s.branches[branchID]
+	if !ok || b.OrgID != orgID || b.State == domain.StateDeleting {
+		return nil, store.ErrNotFound
+	}
+	target := targetCU
+	if target < b.Compute.MinCU {
+		target = b.Compute.MinCU
+	}
+	if target > b.Compute.MaxCU {
+		target = b.Compute.MaxCU
+	}
+	if b.State != domain.StateReady && b.State != domain.StateResizing {
+		return nil, store.ErrConflict
+	}
+	cur := b.Compute.EffectiveCU()
+	if b.State == domain.StateReady && cur == target {
+		b.Endpoints = s.endpointsForLocked(branchID)
+		return &b, nil
+	}
+	b.State = domain.StateResizing
+	b.Compute.CurrentCU = target
+	s.branches[branchID] = b
+	b.Endpoints = s.endpointsForLocked(branchID)
+	return &b, nil
+}
+
 func (s *Store) CreateEndpoint(_ context.Context, orgID, branchID string, kind domain.EndpointKind) (*domain.Endpoint, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

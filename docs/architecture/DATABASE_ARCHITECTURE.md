@@ -143,9 +143,14 @@ the gateway can hold and wake a connecting client.
   un-hibernates the cluster **and scales the pooler back up**, then marks the branch `ready` once
   CNPG reports ready. Targets: p50 < 10 s, p95 < 25 s (Gen 1 — set client `connect_timeout ≥ 30s`;
   documented). WAL archiving and scheduled backups pause while suspended (no changes to archive).
-- **Compute autoscaling:** metrics-driven vertical resize between per-branch min/max CU bounds;
-  scale-up immediate (in-place resource resize where the k8s version supports it, else rolling
-  restart via replica-first switchover to keep it zero-downtime on HA tiers).
+- **Compute autoscaling:** the branch carries a `current_cu` (its running size) which the
+  reconciler applies to the cluster's CPU/memory, autoscaled between its `min_cu`/`max_cu` bounds.
+  A resize is a transitional state — `ready → resizing → ready` — the reconciler converges by
+  re-applying the cluster at the new size (in-place resource resize where the k8s version supports
+  it, else rolling restart via replica-first switchover to keep it zero-downtime on HA tiers);
+  routing is untouched throughout. `POST /branches/{br}/resize {cu}` sets the size manually and is
+  the same action a metrics-driven autoscaler drives (the CPU/memory signal for the auto-decision
+  arrives with the Phase 7 metrics pipeline).
 
 ## 8. Tenant database security defaults
 

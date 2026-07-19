@@ -195,6 +195,11 @@ type Store interface {
 	// returns ErrNotFound.
 	SuspendBranch(ctx context.Context, orgID, branchID string) (*domain.Branch, error)
 	ResumeBranch(ctx context.Context, orgID, branchID string) (*domain.Branch, error)
+	// ResizeBranch sets the branch's running compute size (clamped to its
+	// min/max bounds) and flips it ready → resizing; the reconciler re-applies
+	// the cluster at the new size. Idempotent at the same size; ErrConflict from
+	// a non-ready/resizing state; ErrNotFound if missing.
+	ResizeBranch(ctx context.Context, orgID, branchID string, targetCU float64) (*domain.Branch, error)
 	// WakeBranchByID is the PRIVILEGED, cross-tenant resume the pg-gateway calls
 	// for wake-on-connect (ADR-014): the gateway serves every tenant and has no
 	// org-scoped credential, so it addresses a branch by ID. It resolves the

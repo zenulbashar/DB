@@ -198,6 +198,38 @@ func TestBranchSuspendResumeWiring(t *testing.T) {
 	}
 }
 
+func TestBranchResizeWiring(t *testing.T) {
+	e := bootstrapped(t)
+	_, defBr := createProject(t, e, "resizeapp")
+
+	// A provisioning branch can't be resized → 409 (exercises route/scope/error).
+	if s, b := do(t, e.h, "POST", "/v1/branches/"+defBr+"/resize", e.token,
+		map[string]any{"cu": 2}, nil); s != http.StatusConflict {
+		t.Fatalf("resize provisioning branch = %d, want 409 (%s)", s, b)
+	}
+	// Bad cu → 400.
+	if s, _ := do(t, e.h, "POST", "/v1/branches/"+defBr+"/resize", e.token,
+		map[string]any{"cu": 99}, nil); s != http.StatusBadRequest {
+		t.Fatalf("resize cu=99 = %d, want 400", s)
+	}
+	if s, _ := do(t, e.h, "POST", "/v1/branches/"+defBr+"/resize", e.token,
+		map[string]any{}, nil); s != http.StatusBadRequest {
+		t.Fatalf("resize without cu = %d, want 400", s)
+	}
+	// Requires branches:write.
+	_, body := do(t, e.h, "POST", "/v1/orgs/"+e.orgID+"/api-keys", e.token, map[string]any{
+		"name": "ro", "scopes": []string{"branches:read"},
+	}, nil)
+	var key struct {
+		Token string `json:"token"`
+	}
+	mustUnmarshal(t, body, &key)
+	if s, _ := do(t, e.h, "POST", "/v1/branches/"+defBr+"/resize", key.Token,
+		map[string]any{"cu": 1}, nil); s != http.StatusForbidden {
+		t.Fatalf("resize with branches:read = %d, want 403", s)
+	}
+}
+
 func TestBranchPITRForkWiring(t *testing.T) {
 	e := bootstrapped(t)
 	prjID, defBr := createProject(t, e, "forks")

@@ -170,6 +170,33 @@ func (s *Server) handleResumeBranch(w http.ResponseWriter, r *http.Request) {
 	s.branchComputeAction(w, r, (store.Store).ResumeBranch, "branch.resume")
 }
 
+// handleResizeBranch sets a branch's running compute size (vertical resize,
+// ROADMAP Phase 4). Clamped to [min_cu, max_cu] by the store; 409 if the branch
+// is not in a resizable (ready/resizing) state.
+func (s *Server) handleResizeBranch(w http.ResponseWriter, r *http.Request) {
+	p := principalFrom(r.Context())
+	brID := chi.URLParam(r, "br")
+	var req struct {
+		CU *float64 `json:"cu"`
+	}
+	if !decode(w, r, &req) {
+		return
+	}
+	if req.CU == nil || *req.CU < minCU || *req.CU > maxCU {
+		writeProblem(w, r, http.StatusBadRequest, "validation", "Validation failed",
+			"cu must be between 0.25 and 8.")
+		return
+	}
+	b, err := s.store.ResizeBranch(r.Context(), p.OrgID, brID, *req.CU)
+	if err != nil {
+		s.branchErr(w, r, err)
+		return
+	}
+	s.auditKey(r, p.OrgID, "branch.resize", "branch", brID,
+		map[string]any{"cu": b.Compute.CurrentCU, "state": b.State})
+	writeJSON(w, http.StatusOK, b)
+}
+
 func (s *Server) branchComputeAction(w http.ResponseWriter, r *http.Request,
 	action func(store.Store, context.Context, string, string) (*domain.Branch, error), auditAction string) {
 	p := principalFrom(r.Context())

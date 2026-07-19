@@ -2,6 +2,36 @@
 
 All notable changes to this repository. Format loosely follows [Keep a Changelog](https://keepachangelog.com/); one entry per phase gate plus notable intermediate merges.
 
+## [Phase 4 — vertical resize] — 2026-07-19
+
+The zero-downtime vertical-resize substrate for compute autoscaling (ROADMAP Phase 4).
+
+### Added
+- **`current_cu`** (migration `0010`) — the branch's actual running compute size; the reconciler
+  sizes the cluster's CPU/memory from it (`Compute.EffectiveCU`, falling back to `min_cu` before the
+  first resize) instead of always `min_cu`.
+- **Resize state machine** — `ResizeBranch(orgID, branchID, cu)` clamps `cu` to `[min_cu, max_cu]`
+  and flips the branch `ready → resizing` (a new state); a new reconcile path (`resizeCompute` →
+  `MarkBranchResized`) re-applies the cluster at the new size and flips it back to `ready` — the same
+  zero-downtime, crash-safe shape as suspend/resume. Routing is untouched: endpoints stay `ready`
+  and `resizing` branches remain in the route table. Idempotent at the same size; 409 from a
+  non-ready/resizing state.
+- **API** — `POST /branches/{br}/resize {cu}` (`branches:write`), the same action a metrics-driven
+  autoscaler drives; `current_cu` surfaced on the Branch resource. Spec-first: `api/openapi.yaml`
+  `resizeBranch` + `Compute.current_cu` + regenerated TS client.
+
+### Notes
+- This is the resize *mechanism*. The metrics-driven auto-decision (when to scale up/down from
+  CPU/memory pressure) depends on the Phase 7 metrics pipeline (Prometheus → ClickHouse) and is
+  deferred to it; the mechanism, bounds, and manual/autoscaler entry point ship now.
+
+### Tests
+- Reconciler: `BuildCluster` sizes from `current_cu` (with min fallback); a `resizing` branch
+  re-applies the cluster at the new CU and marks resized when healthy. Store: `ResizeBranch`
+  clamping, `ready → resizing → ready`, route stays up while resizing, conflict from a suspended
+  branch, cross-org/missing 404 (postgres + memory). Server: `POST /resize` (409 on provisioning,
+  400 on bad/absent cu, scope).
+
 ## [Phase 4 — branching / data forks] — 2026-07-19
 
 ### Decided (ADR-016)

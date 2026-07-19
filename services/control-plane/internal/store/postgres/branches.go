@@ -13,11 +13,12 @@ import (
 )
 
 const branchCols = `id, project_id, org_id, parent_id, name, role, state,
-	compute_min_cu, compute_max_cu, suspend_timeout_s, retention_days, bootstrap_at, created_at`
+	compute_min_cu, compute_max_cu, COALESCE(current_cu, 0), suspend_timeout_s, retention_days, bootstrap_at, created_at`
 
 func scanBranch(row pgx.Row, b *domain.Branch) error {
 	return row.Scan(&b.ID, &b.ProjectID, &b.OrgID, &b.ParentID, &b.Name, &b.Role, &b.State,
-		&b.Compute.MinCU, &b.Compute.MaxCU, &b.Compute.SuspendTimeoutS, &b.RetentionDays, &b.BootstrapAt, &b.CreatedAt)
+		&b.Compute.MinCU, &b.Compute.MaxCU, &b.Compute.CurrentCU, &b.Compute.SuspendTimeoutS,
+		&b.RetentionDays, &b.BootstrapAt, &b.CreatedAt)
 }
 
 // createBranchTx inserts a branch and its rw_direct + rw_pooled endpoint
@@ -225,6 +226,70 @@ func (s *Store) ResumeBranch(ctx context.Context, orgID, branchID string) (*doma
 	return s.transitionBranchState(ctx, orgID, branchID,
 		domain.StateSuspended, domain.StateResuming,
 		[]domain.ResourceState{domain.StateResuming, domain.StateReady})
+}
+
+// ResizeBranch sets a branch's running compute size (clamped to its
+// min/max bounds) and flips it ready → resizing; the reconciler re-applies the
+// cluster at the new size and flips it back to ready (ROADMAP Phase 4). It
+// coalesces a new target while already resizing, and is a no-op success when
+// the branch is already ready at that size. Any non-ready/resizing state (or a
+// missing branch) is a conflict / not-found.
+func (s *Store) ResizeBranch(ctx context.Context, orgID, branchID string, targetCU float64) (*domain.Branch, error) {
+	var b domain.Branch
+	load := func(tx pgx.Tx) error {
+		if err := scanBranch(tx.QueryRow(ctx,
+			`SELECT `+branchCols+` FROM branches WHERE id = $1 AND org_id = $2`, branchID, orgID), &b); err != nil {
+			return err
+		}
+		eps, err := listEndpointsTx(ctx, tx, branchID)
+		if err != nil {
+			return err
+		}
+		b.Endpoints = eps
+		return nil
+	}
+	err := s.withOrgTx(ctx, orgID, func(tx pgx.Tx) error {
+		var minCU, maxCU float64
+		var cur *float64
+		var state domain.ResourceState
+		err := tx.QueryRow(ctx,
+			`SELECT compute_min_cu, compute_max_cu, current_cu, state
+			   FROM branches WHERE id = $1 AND org_id = $2 AND state <> 'deleting'`,
+			branchID, orgID).Scan(&minCU, &maxCU, &cur, &state)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return store.ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		target := targetCU
+		if target < minCU {
+			target = minCU
+		}
+		if target > maxCU {
+			target = maxCU
+		}
+		if state != domain.StateReady && state != domain.StateResizing {
+			return store.ErrConflict
+		}
+		curVal := minCU
+		if cur != nil && *cur > 0 {
+			curVal = *cur
+		}
+		if state == domain.StateReady && curVal == target {
+			return load(tx) // already at size — idempotent no-op
+		}
+		if _, err := tx.Exec(ctx,
+			`UPDATE branches SET state = 'resizing', current_cu = $3 WHERE id = $1 AND org_id = $2`,
+			branchID, orgID, target); err != nil {
+			return err
+		}
+		return load(tx)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &b, nil
 }
 
 // WakeBranchByID resolves the branch's org with a privileged read, then reuses
