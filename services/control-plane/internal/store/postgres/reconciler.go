@@ -36,6 +36,9 @@ func (s *Store) ListReconcileWork(ctx context.Context) ([]BranchWork, error) {
 			       p.region, p.pg_version
 			  FROM branches b JOIN projects p ON p.id = b.project_id
 			 WHERE b.state IN ('provisioning','deleting','suspending','resuming')
+			    OR (b.state = 'ready'
+			        AND EXISTS (SELECT 1 FROM endpoints e
+			                     WHERE e.branch_id = b.id AND e.state = 'provisioning'))
 			 ORDER BY b.id`)
 		if err != nil {
 			return err
@@ -95,6 +98,17 @@ func (s *Store) MarkBranchSuspended(ctx context.Context, branchID string) error 
 // once the compute is un-hibernated and healthy.
 func (s *Store) MarkBranchResumed(ctx context.Context, branchID string) error {
 	return s.markBranchComputeState(ctx, branchID, "resuming", "ready")
+}
+
+// MarkEndpointsReady flips a branch's newly-provisioned endpoints (an added
+// read endpoint) to ready once the reconciler has built their backing pooler +
+// replica. The branch itself is untouched (it stays ready).
+func (s *Store) MarkEndpointsReady(ctx context.Context, branchID string) error {
+	return s.withPrivTx(ctx, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx,
+			`UPDATE endpoints SET state = 'ready' WHERE branch_id = $1 AND state = 'provisioning'`, branchID)
+		return err
+	})
 }
 
 func (s *Store) markBranchComputeState(ctx context.Context, branchID, from, to string) error {

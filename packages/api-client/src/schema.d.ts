@@ -561,7 +561,11 @@ export interface paths {
         /** List a branch's endpoints */
         get: operations["listEndpoints"];
         put?: never;
-        post?: never;
+        /**
+         * Add an endpoint to a branch (e.g. a read replica)
+         * @description Adds an endpoint of the given kind. `ro_pooled` provisions a read replica: the reconciler scales the branch's cluster to a primary + hot-standby and fronts the replicas with a read pooler. The new endpoint starts `provisioning` and becomes `ready` once its backing resources are up. 409 if an endpoint of that kind already exists (branches ship with `rw_direct` + `rw_pooled`).
+         */
+        post: operations["createEndpoint"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1931,6 +1935,37 @@ export interface operations {
                 };
             };
             404: components["responses"]["Problem"];
+        };
+    };
+    createEndpoint: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                br: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    kind: "rw_direct" | "rw_pooled" | "ro_pooled";
+                };
+            };
+        };
+        responses: {
+            /** @description Created endpoint */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Endpoint"];
+                };
+            };
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
         };
     };
 }

@@ -54,19 +54,33 @@ func suspendedCompute(state domain.ResourceState) bool {
 func NamespaceName(projectID string) string { return strings.ReplaceAll(projectID, "_", "-") }
 func ClusterName(branchID string) string    { return strings.ReplaceAll(branchID, "_", "-") }
 func PoolerName(branchID string) string     { return ClusterName(branchID) + "-pooler" }
+func ROPoolerName(branchID string) string   { return ClusterName(branchID) + "-ro-pooler" }
 
 // BackendFor derives the in-cluster service address the gateway dials for an
-// endpoint (DATABASE_ARCHITECTURE §5 wiring).
+// endpoint (DATABASE_ARCHITECTURE §5 wiring). The read endpoint routes through
+// its own PgBouncer (type: ro), which fans reads out to the cluster's replicas.
 func BackendFor(kind domain.EndpointKind, branchID, projectID string) string {
 	ns := NamespaceName(projectID)
 	switch kind {
 	case domain.EndpointRWPooled:
 		return fmt.Sprintf("%s.%s.svc:5432", PoolerName(branchID), ns)
 	case domain.EndpointROPooled:
-		return fmt.Sprintf("%s-ro.%s.svc:5432", ClusterName(branchID), ns)
+		return fmt.Sprintf("%s.%s.svc:5432", ROPoolerName(branchID), ns)
 	default: // rw_direct
 		return fmt.Sprintf("%s-rw.%s.svc:5432", ClusterName(branchID), ns)
 	}
+}
+
+// hasReadEndpoint reports whether the branch exposes a read (ro_pooled)
+// endpoint — which requires a replica to read from, so the cluster is scaled to
+// at least two instances (ADR: read replicas).
+func hasReadEndpoint(w postgres.BranchWork) bool {
+	for _, e := range w.Endpoints {
+		if e.Kind == domain.EndpointROPooled && e.State != domain.StateDeleting {
+			return true
+		}
+	}
+	return false
 }
 
 func commonLabels(w postgres.BranchWork) map[string]any {
@@ -235,6 +249,10 @@ func BuildCluster(w postgres.BranchWork, backup *BackupConfig) *unstructured.Uns
 	if w.Branch.Role == domain.BranchProduction {
 		instances = 2
 	}
+	// A read endpoint needs at least one hot-standby replica to serve reads.
+	if hasReadEndpoint(w) && instances < 2 {
+		instances = 2
+	}
 	cpuMilli := int(w.Branch.Compute.MinCU * 1000)
 	memMi := int(w.Branch.Compute.MinCU * 4096)
 	res := map[string]any{
@@ -300,6 +318,38 @@ func BuildPooler(w postgres.BranchWork) *unstructured.Unstructured {
 			"cluster":   map[string]any{"name": ClusterName(w.Branch.ID)},
 			"instances": instances,
 			"type":      "rw",
+			"pgbouncer": map[string]any{
+				"poolMode": "transaction",
+				"parameters": map[string]any{
+					"max_prepared_statements": "512",
+					"default_pool_size":       "20",
+				},
+			},
+		},
+	}}
+}
+
+// BuildROPooler renders the branch's READ pooler: a transaction-mode PgBouncer
+// of type `ro` that fans reads out to the cluster's hot-standby replicas (the
+// ro_pooled endpoint; read replicas). Scaled to zero alongside a hibernated
+// cluster, like the rw pooler.
+func BuildROPooler(w postgres.BranchWork) *unstructured.Unstructured {
+	instances := int64(1)
+	if suspendedCompute(w.Branch.State) {
+		instances = 0
+	}
+	return &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": PoolerGVK.GroupVersion().String(),
+		"kind":       PoolerGVK.Kind,
+		"metadata": map[string]any{
+			"name":      ROPoolerName(w.Branch.ID),
+			"namespace": NamespaceName(w.ProjectID),
+			"labels":    commonLabels(w),
+		},
+		"spec": map[string]any{
+			"cluster":   map[string]any{"name": ClusterName(w.Branch.ID)},
+			"instances": instances,
+			"type":      "ro",
 			"pgbouncer": map[string]any{
 				"poolMode": "transaction",
 				"parameters": map[string]any{

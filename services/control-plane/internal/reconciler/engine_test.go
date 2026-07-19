@@ -19,14 +19,15 @@ import (
 
 // fakeSource implements Source in memory.
 type fakeSource struct {
-	work      []postgres.BranchWork
-	routable  []postgres.RoutableEndpoint
-	ready     []string
-	suspended []string
-	resumed   []string
-	tornDown  []string
-	sweptIdle []string
-	liveCount map[string]int
+	work           []postgres.BranchWork
+	routable       []postgres.RoutableEndpoint
+	ready          []string
+	suspended      []string
+	resumed        []string
+	endpointsReady []string
+	tornDown       []string
+	sweptIdle      []string
+	liveCount      map[string]int
 }
 
 func (f *fakeSource) ListReconcileWork(context.Context) ([]postgres.BranchWork, error) {
@@ -42,6 +43,10 @@ func (f *fakeSource) MarkBranchSuspended(_ context.Context, id string) error {
 }
 func (f *fakeSource) MarkBranchResumed(_ context.Context, id string) error {
 	f.resumed = append(f.resumed, id)
+	return nil
+}
+func (f *fakeSource) MarkEndpointsReady(_ context.Context, id string) error {
+	f.endpointsReady = append(f.endpointsReady, id)
 	return nil
 }
 func (f *fakeSource) FinishBranchTeardown(_ context.Context, id string) error {
@@ -284,7 +289,7 @@ func TestBackendFor(t *testing.T) {
 	cases := map[domain.EndpointKind]string{
 		domain.EndpointRWDirect: "br-01x-rw.prj-01y.svc:5432",
 		domain.EndpointRWPooled: "br-01x-pooler.prj-01y.svc:5432",
-		domain.EndpointROPooled: "br-01x-ro.prj-01y.svc:5432",
+		domain.EndpointROPooled: "br-01x-ro-pooler.prj-01y.svc:5432",
 	}
 	for kind, want := range cases {
 		if got := BackendFor(kind, "br_01x", "prj_01y"); got != want {

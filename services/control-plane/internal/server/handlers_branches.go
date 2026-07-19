@@ -230,6 +230,35 @@ func (s *Server) branchErr(w http.ResponseWriter, r *http.Request, err error) {
 	s.storeErr(w, r, err)
 }
 
+// handleCreateEndpoint adds an endpoint to a branch — in practice a read
+// replica (ro_pooled), which the reconciler backs with a hot-standby + a read
+// pooler (DATABASE_ARCHITECTURE §5).
+func (s *Server) handleCreateEndpoint(w http.ResponseWriter, r *http.Request) {
+	p := principalFrom(r.Context())
+	brID := chi.URLParam(r, "br")
+	var req struct {
+		Kind domain.EndpointKind `json:"kind"`
+	}
+	if !decode(w, r, &req) {
+		return
+	}
+	switch req.Kind {
+	case domain.EndpointRWDirect, domain.EndpointRWPooled, domain.EndpointROPooled:
+	default:
+		writeProblem(w, r, http.StatusBadRequest, "validation", "Validation failed",
+			"kind must be rw_direct|rw_pooled|ro_pooled.")
+		return
+	}
+	ep, err := s.store.CreateEndpoint(r.Context(), p.OrgID, brID, req.Kind)
+	if err != nil {
+		s.storeErr(w, r, err)
+		return
+	}
+	s.auditKey(r, p.OrgID, "endpoint.create", "endpoint", ep.ID,
+		map[string]any{"branch": brID, "kind": ep.Kind})
+	writeJSON(w, http.StatusCreated, ep)
+}
+
 func (s *Server) handleListEndpoints(w http.ResponseWriter, r *http.Request) {
 	p := principalFrom(r.Context())
 	eps, err := s.store.ListEndpoints(r.Context(), p.OrgID, chi.URLParam(r, "br"))

@@ -2,6 +2,28 @@
 
 All notable changes to this repository. Format loosely follows [Keep a Changelog](https://keepachangelog.com/); one entry per phase gate plus notable intermediate merges.
 
+## [Phase 4 — read replicas & read endpoint] — 2026-07-19
+
+### Added
+- **`ro_pooled` read endpoint** — `POST /branches/{br}/endpoints {kind}` adds an endpoint to a
+  branch. `ro_pooled` provisions a **read replica**: the reconciler scales the branch's cluster to
+  a primary + hot-standby (`instances >= 2` whenever a read endpoint exists) and fronts the replicas
+  with a dedicated read pooler (`BuildROPooler`, CNPG `type: ro`). `BackendFor(ro_pooled)` routes to
+  that pooler. 409 if an endpoint of that kind already exists (branches ship with
+  `rw_direct` + `rw_pooled`).
+- **Non-disruptive endpoint reconcile** — adding an endpoint to a *ready* branch no longer needs a
+  re-provision: `ListReconcileWork` now also returns ready branches with a `provisioning` endpoint,
+  and a new reconcile path (`reconcileEndpoints` → `MarkEndpointsReady`) scales the cluster, builds
+  the read pooler, and flips just the new endpoint to `ready` — the branch stays `ready` throughout.
+- Spec-first: `api/openapi.yaml` `createEndpoint` + regenerated TS client. Teardown removes the read
+  pooler alongside the rw pooler and cluster.
+
+### Tests
+- Store: `CreateEndpoint` (creates `ro_pooled` provisioning, dup-kind 409, missing-branch 404) and
+  `MarkEndpointsReady`; reconciler picks up a ready branch with a pending read endpoint. Reconciler:
+  a branch with a read endpoint provisions a 2-instance cluster + a `type: ro` pooler and marks the
+  endpoint ready when healthy. Server: `POST /endpoints` (kind validation + scope + 409).
+
 ## [Phase 4 — suspend-on-idle] — 2026-07-19
 
 Closes the automatic scale-to-zero loop: idle branches now hibernate on their own (the wake half

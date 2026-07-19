@@ -197,6 +197,52 @@ func TestBranchSuspendResumeWiring(t *testing.T) {
 	}
 }
 
+func TestCreateEndpointWiring(t *testing.T) {
+	e := bootstrapped(t)
+	_, defBr := createProject(t, e, "replicas")
+
+	// Add a read endpoint → 201.
+	status, body := do(t, e.h, "POST", "/v1/branches/"+defBr+"/endpoints", e.token,
+		map[string]any{"kind": "ro_pooled"}, nil)
+	if status != http.StatusCreated {
+		t.Fatalf("create ro endpoint = %d (%s)", status, body)
+	}
+	var ep struct {
+		Kind  string `json:"kind"`
+		State string `json:"state"`
+	}
+	mustUnmarshal(t, body, &ep)
+	if ep.Kind != "ro_pooled" || ep.State != "provisioning" {
+		t.Fatalf("endpoint = %+v", ep)
+	}
+	// Duplicate → 409.
+	if s, _ := do(t, e.h, "POST", "/v1/branches/"+defBr+"/endpoints", e.token,
+		map[string]any{"kind": "ro_pooled"}, nil); s != http.StatusConflict {
+		t.Fatalf("duplicate ro endpoint = %d, want 409", s)
+	}
+	// Invalid kind → 400.
+	if s, _ := do(t, e.h, "POST", "/v1/branches/"+defBr+"/endpoints", e.token,
+		map[string]any{"kind": "sideways"}, nil); s != http.StatusBadRequest {
+		t.Fatalf("bad kind = %d, want 400", s)
+	}
+
+	// Requires branches:write.
+	status, body = do(t, e.h, "POST", "/v1/orgs/"+e.orgID+"/api-keys", e.token, map[string]any{
+		"name": "ro", "scopes": []string{"branches:read"},
+	}, nil)
+	if status != http.StatusCreated {
+		t.Fatalf("create key = %d %s", status, body)
+	}
+	var key struct {
+		Token string `json:"token"`
+	}
+	mustUnmarshal(t, body, &key)
+	if s, _ := do(t, e.h, "POST", "/v1/branches/"+defBr+"/endpoints", key.Token,
+		map[string]any{"kind": "ro_pooled"}, nil); s != http.StatusForbidden {
+		t.Fatalf("create endpoint with branches:read = %d, want 403", s)
+	}
+}
+
 func TestBranchValidation(t *testing.T) {
 	e := bootstrapped(t)
 	prjID, _ := createProject(t, e, "app")

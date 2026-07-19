@@ -947,6 +947,34 @@ paths:
                     items: { $ref: "#/components/schemas/Endpoint" }
                 required: [data]
         "404": { $ref: "#/components/responses/Problem" }
+    post:
+      tags: [branches]
+      operationId: createEndpoint
+      summary: Add an endpoint to a branch (e.g. a read replica)
+      description: >
+        Adds an endpoint of the given kind. `ro_pooled` provisions a read replica:
+        the reconciler scales the branch's cluster to a primary + hot-standby and
+        fronts the replicas with a read pooler. The new endpoint starts
+        `provisioning` and becomes `ready` once its backing resources are up. 409
+        if an endpoint of that kind already exists (branches ship with
+        `rw_direct` + `rw_pooled`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                kind: { type: string, enum: [rw_direct, rw_pooled, ro_pooled] }
+              required: [kind]
+      responses:
+        "201":
+          description: Created endpoint
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Endpoint" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
 
 components:
   securitySchemes:
