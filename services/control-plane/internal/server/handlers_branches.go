@@ -37,6 +37,7 @@ func (s *Server) handleCreateBranch(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name            string            `json:"name"`
 		FromBranch      *string           `json:"from_branch"`
+		At              *string           `json:"at"` // RFC3339 PITR fork target
 		Role            domain.BranchRole `json:"role"`
 		ComputeMinCU    *float64          `json:"compute_min_cu"`
 		ComputeMaxCU    *float64          `json:"compute_max_cu"`
@@ -44,6 +45,22 @@ func (s *Server) handleCreateBranch(w http.ResponseWriter, r *http.Request) {
 	}
 	if !decode(w, r, &req) {
 		return
+	}
+	var bootstrapAt *time.Time
+	if req.At != nil {
+		t, err := time.Parse(time.RFC3339, *req.At)
+		if err != nil {
+			writeProblem(w, r, http.StatusBadRequest, "validation", "Validation failed",
+				"at must be an RFC3339 timestamp.")
+			return
+		}
+		if req.FromBranch == nil {
+			writeProblem(w, r, http.StatusBadRequest, "validation", "Validation failed",
+				"at requires from_branch (point-in-time fork of a parent).")
+			return
+		}
+		utc := t.UTC()
+		bootstrapAt = &utc
 	}
 	// "main" collides with the default branch through the store's per-project
 	// uniqueness check, so no special-casing beyond length validation here.
@@ -75,6 +92,7 @@ func (s *Server) handleCreateBranch(w http.ResponseWriter, r *http.Request) {
 	b, err := s.store.CreateBranch(r.Context(), store.CreateBranchParams{
 		OrgID: p.OrgID, ProjectID: prjID, Name: req.Name,
 		ParentID: req.FromBranch, Role: req.Role, Compute: compute,
+		BootstrapAt: bootstrapAt,
 	})
 	if err != nil {
 		s.storeErr(w, r, err)

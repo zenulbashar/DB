@@ -484,9 +484,12 @@ paths:
       operationId: createBranch
       summary: Create a branch
       description: |
-        Creates a branch record with its rw_direct + rw_pooled endpoints in
-        `provisioning` state. `from_branch` defaults to the project's default
-        branch. Point-in-time sources (`at`) arrive in Phase 4.
+        Creates a branch with its rw_direct + rw_pooled endpoints in
+        `provisioning` state. A branch is a **data fork** of `from_branch`
+        (defaults to the project's default branch): the reconciler bootstraps its
+        cluster by recovery from the parent's WAL archive. `at` (RFC3339) forks
+        from that point in time instead of the parent's latest state; it requires
+        `from_branch` and must fall within the parent's backup retention window.
       requestBody:
         required: true
         content:
@@ -496,6 +499,7 @@ paths:
               properties:
                 name: { type: string, minLength: 1, maxLength: 63 }
                 from_branch: { type: [string, "null"] }
+                at: { type: string, format: date-time, description: "Point-in-time fork target (RFC3339); requires from_branch." }
                 role: { $ref: "#/components/schemas/BranchRole" }
                 compute_min_cu: { type: number, minimum: 0.25, maximum: 8 }
                 compute_max_cu: { type: number, minimum: 0.25, maximum: 8 }
@@ -1150,6 +1154,10 @@ components:
         state: { $ref: "#/components/schemas/ResourceState" }
         compute: { $ref: "#/components/schemas/Compute" }
         retention_days: { type: integer }
+        bootstrap_at:
+          type: [string, "null"]
+          format: date-time
+          description: Point-in-time this branch was forked from its parent; null if forked from the latest state or a root branch.
         created_at: { type: string, format: date-time }
         endpoints:
           type: array

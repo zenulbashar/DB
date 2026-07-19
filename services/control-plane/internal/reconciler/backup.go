@@ -144,3 +144,45 @@ func BuildRecoveryCluster(source postgres.BranchWork, target RecoveryTarget, cfg
 	delete(spec, "backup")
 	return base
 }
+
+// BuildBranchedCluster renders a branch's cluster as a DATA FORK of its parent
+// (ADR-016): the CHILD's own compute spec and its OWN forward WAL-archive
+// stream, but bootstrapped by CNPG recovery from the PARENT's WAL archive (a
+// read-only `origin` external cluster). Unlike BuildRecoveryCluster — which is
+// for ephemeral verify/restore clusters and drops archiving — a branch is a
+// durable, independent fork, so it keeps its own backup section (a distinct
+// destinationPath from the parent's). target selects the fork point; the zero
+// value forks from the parent's latest archived state ("branch from now").
+func BuildBranchedCluster(child, parent postgres.BranchWork, target RecoveryTarget, cfg *BackupConfig) *unstructured.Unstructured {
+	base := BuildCluster(child, cfg) // child's own spec + its own forward archive
+	spec := base.Object["spec"].(map[string]any)
+
+	recovery := map[string]any{"source": "origin"}
+	if !target.Time.IsZero() {
+		recovery["recoveryTarget"] = map[string]any{
+			"targetTime": target.Time.UTC().Format(time.RFC3339),
+		}
+	}
+	spec["bootstrap"] = map[string]any{"recovery": recovery}
+
+	origin := map[string]any{
+		"name": "origin",
+		"barmanObjectStore": map[string]any{
+			"destinationPath": cfg.destinationPath(parent), // the PARENT's archive
+			"s3Credentials": map[string]any{
+				"accessKeyId": map[string]any{
+					"name": cfg.CredentialsSecret, "key": "ACCESS_KEY_ID",
+				},
+				"secretAccessKey": map[string]any{
+					"name": cfg.CredentialsSecret, "key": "ACCESS_SECRET_KEY",
+				},
+			},
+			"wal": map[string]any{"compression": "gzip"},
+		},
+	}
+	if cfg.EndpointURL != "" {
+		origin["barmanObjectStore"].(map[string]any)["endpointURL"] = cfg.EndpointURL
+	}
+	spec["externalClusters"] = []any{origin}
+	return base
+}

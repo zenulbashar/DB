@@ -31,7 +31,7 @@ func (s *Store) createBranchLocked(p store.CreateBranchParams) (*domain.Branch, 
 		ID: ids.New(ids.Branch), ProjectID: p.ProjectID, OrgID: p.OrgID,
 		ParentID: p.ParentID, Name: p.Name, Role: p.Role,
 		State: domain.StateProvisioning, Compute: c, RetentionDays: 7,
-		CreatedAt: time.Now().UTC(),
+		BootstrapAt: p.BootstrapAt, CreatedAt: time.Now().UTC(),
 	}
 	for _, kind := range []domain.EndpointKind{domain.EndpointRWDirect, domain.EndpointRWPooled} {
 		ep := domain.Endpoint{

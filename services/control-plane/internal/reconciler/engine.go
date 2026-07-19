@@ -108,10 +108,30 @@ func (e *Engine) ReconcileOnce(ctx context.Context) error {
 	return firstErr
 }
 
+// clusterFor renders a branch's cluster. A non-root branch (parent_id set) is a
+// DATA FORK bootstrapped by recovery from its parent's WAL archive (ADR-016) —
+// which needs a backup config; without one (local dev) it falls back to an
+// empty initdb cluster. The root branch always bootstraps empty.
+func (e *Engine) clusterFor(w postgres.BranchWork) *unstructured.Unstructured {
+	if w.Branch.ParentID != nil && e.backup != nil {
+		parent := postgres.BranchWork{ProjectID: w.ProjectID, Branch: domain.Branch{ID: *w.Branch.ParentID}}
+		var target RecoveryTarget
+		if w.Branch.BootstrapAt != nil {
+			target.Time = *w.Branch.BootstrapAt
+		}
+		return BuildBranchedCluster(w, parent, target, e.backup)
+	}
+	if w.Branch.ParentID != nil && e.backup == nil {
+		e.log.Warn("branch has a parent but no backup config; provisioning EMPTY (dev only)",
+			"branch", w.Branch.ID, "parent", *w.Branch.ParentID)
+	}
+	return BuildCluster(w, e.backup)
+}
+
 func (e *Engine) provision(ctx context.Context, w postgres.BranchWork) error {
 	objs := []*unstructured.Unstructured{BuildNamespace(w), BuildResourceQuota(w)}
 	objs = append(objs, BuildNetworkPolicies(w)...)
-	objs = append(objs, BuildCluster(w, e.backup), BuildPooler(w))
+	objs = append(objs, e.clusterFor(w), BuildPooler(w))
 	if hasReadEndpoint(w) {
 		objs = append(objs, BuildROPooler(w))
 	}
@@ -191,7 +211,7 @@ func (e *Engine) resume(ctx context.Context, w postgres.BranchWork) error {
 // endpoints ready once the cluster is healthy. Non-disruptive — the branch
 // stays ready throughout; only the new endpoint moves provisioning → ready.
 func (e *Engine) reconcileEndpoints(ctx context.Context, w postgres.BranchWork) error {
-	objs := []*unstructured.Unstructured{BuildCluster(w, e.backup), BuildPooler(w)}
+	objs := []*unstructured.Unstructured{e.clusterFor(w), BuildPooler(w)}
 	if hasReadEndpoint(w) {
 		objs = append(objs, BuildROPooler(w))
 	}

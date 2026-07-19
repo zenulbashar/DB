@@ -272,9 +272,12 @@ export interface paths {
         put?: never;
         /**
          * Create a branch
-         * @description Creates a branch record with its rw_direct + rw_pooled endpoints in
-         *     `provisioning` state. `from_branch` defaults to the project's default
-         *     branch. Point-in-time sources (`at`) arrive in Phase 4.
+         * @description Creates a branch with its rw_direct + rw_pooled endpoints in
+         *     `provisioning` state. A branch is a **data fork** of `from_branch`
+         *     (defaults to the project's default branch): the reconciler bootstraps its
+         *     cluster by recovery from the parent's WAL archive. `at` (RFC3339) forks
+         *     from that point in time instead of the parent's latest state; it requires
+         *     `from_branch` and must fall within the parent's backup retention window.
          */
         post: operations["createBranch"];
         delete?: never;
@@ -669,6 +672,11 @@ export interface components {
             state: components["schemas"]["ResourceState"];
             compute: components["schemas"]["Compute"];
             retention_days: number;
+            /**
+             * Format: date-time
+             * @description Point-in-time this branch was forked from its parent; null if forked from the latest state or a root branch.
+             */
+            bootstrap_at?: string | null;
             /** Format: date-time */
             created_at: string;
             /** @description Present on single-branch reads and creation responses. */
@@ -1388,6 +1396,11 @@ export interface operations {
                 "application/json": {
                     name: string;
                     from_branch?: string | null;
+                    /**
+                     * Format: date-time
+                     * @description Point-in-time fork target (RFC3339); requires from_branch.
+                     */
+                    at?: string;
                     role?: components["schemas"]["BranchRole"];
                     compute_min_cu?: number;
                     compute_max_cu?: number;

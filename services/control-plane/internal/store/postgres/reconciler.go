@@ -32,7 +32,8 @@ func (s *Store) ListReconcileWork(ctx context.Context) ([]BranchWork, error) {
 	err := s.withPrivTx(ctx, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
 			SELECT b.id, b.project_id, b.org_id, b.parent_id, b.name, b.role, b.state,
-			       b.compute_min_cu, b.compute_max_cu, b.suspend_timeout_s, b.retention_days, b.created_at,
+			       b.compute_min_cu, b.compute_max_cu, b.suspend_timeout_s, b.retention_days,
+			       b.bootstrap_at, b.created_at,
 			       p.region, p.pg_version
 			  FROM branches b JOIN projects p ON p.id = b.project_id
 			 WHERE b.state IN ('provisioning','deleting','suspending','resuming')
@@ -48,7 +49,8 @@ func (s *Store) ListReconcileWork(ctx context.Context) ([]BranchWork, error) {
 			var w BranchWork
 			b := &w.Branch
 			if err := rows.Scan(&b.ID, &b.ProjectID, &b.OrgID, &b.ParentID, &b.Name, &b.Role, &b.State,
-				&b.Compute.MinCU, &b.Compute.MaxCU, &b.Compute.SuspendTimeoutS, &b.RetentionDays, &b.CreatedAt,
+				&b.Compute.MinCU, &b.Compute.MaxCU, &b.Compute.SuspendTimeoutS, &b.RetentionDays,
+				&b.BootstrapAt, &b.CreatedAt,
 				&w.Region, &w.PGVersion); err != nil {
 				return err
 			}

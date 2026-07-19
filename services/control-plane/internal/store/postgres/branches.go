@@ -13,11 +13,11 @@ import (
 )
 
 const branchCols = `id, project_id, org_id, parent_id, name, role, state,
-	compute_min_cu, compute_max_cu, suspend_timeout_s, retention_days, created_at`
+	compute_min_cu, compute_max_cu, suspend_timeout_s, retention_days, bootstrap_at, created_at`
 
 func scanBranch(row pgx.Row, b *domain.Branch) error {
 	return row.Scan(&b.ID, &b.ProjectID, &b.OrgID, &b.ParentID, &b.Name, &b.Role, &b.State,
-		&b.Compute.MinCU, &b.Compute.MaxCU, &b.Compute.SuspendTimeoutS, &b.RetentionDays, &b.CreatedAt)
+		&b.Compute.MinCU, &b.Compute.MaxCU, &b.Compute.SuspendTimeoutS, &b.RetentionDays, &b.BootstrapAt, &b.CreatedAt)
 }
 
 // createBranchTx inserts a branch and its rw_direct + rw_pooled endpoint
@@ -37,14 +37,14 @@ func createBranchTx(ctx context.Context, tx pgx.Tx, p store.CreateBranchParams) 
 		ID: ids.New(ids.Branch), ProjectID: p.ProjectID, OrgID: p.OrgID,
 		ParentID: p.ParentID, Name: p.Name, Role: p.Role,
 		State: domain.StateProvisioning, Compute: c, RetentionDays: 7,
-		CreatedAt: time.Now().UTC(),
+		BootstrapAt: p.BootstrapAt, CreatedAt: time.Now().UTC(),
 	}
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO branches (id, project_id, org_id, parent_id, name, role, state,
-		    compute_min_cu, compute_max_cu, suspend_timeout_s, retention_days, created_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+		    compute_min_cu, compute_max_cu, suspend_timeout_s, retention_days, bootstrap_at, created_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
 		b.ID, b.ProjectID, b.OrgID, b.ParentID, b.Name, b.Role, b.State,
-		b.Compute.MinCU, b.Compute.MaxCU, b.Compute.SuspendTimeoutS, b.RetentionDays, b.CreatedAt); err != nil {
+		b.Compute.MinCU, b.Compute.MaxCU, b.Compute.SuspendTimeoutS, b.RetentionDays, b.BootstrapAt, b.CreatedAt); err != nil {
 		return nil, err
 	}
 	for _, kind := range []domain.EndpointKind{domain.EndpointRWDirect, domain.EndpointRWPooled} {
