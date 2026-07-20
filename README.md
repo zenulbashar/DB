@@ -49,6 +49,10 @@ make smoke         # end-to-end: bootstrap + create a project via the API, then 
 The data plane (per-tenant Postgres clusters) needs a `kind` cluster with CloudNativePG — see
 `tools/dev-up.sh`. The control plane, console, and import engine run without it.
 
+The console serves two shells: the tenant console at `/` (sign in with an `ndb_` API key; in-app
+help at `/kb`) and the **operator console** at `/admin` (sign in with `NDB_ADMIN_TOKEN` —
+`make dev` exports `dev-admin-token`; see ADR-018).
+
 ## Rules of the repo
 
 1. **Docs first.** Implementation that diverges from `docs/architecture` updates the docs in the
