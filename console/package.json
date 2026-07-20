@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@nimbusdb/api-client": "file:../packages/api-client",
+    "marked": "^15.0.12",
     "next": "^15.4.5",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
