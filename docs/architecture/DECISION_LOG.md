@@ -196,6 +196,25 @@ minutes by size) — the honest Gen-1 number; CoW snapshots are the Gen-2 speedu
 `at` a time before the parent's retention window will fail recovery (surfaced as the branch going
 `error`); the API documents the retention bound.
 
+## ADR-017 · User-facing knowledge base lives in-repo as markdown, rendered by the console at `/kb` — `accepted`
+**Context:** Users need self-serve help for every shipped feature (Phase 3 "developer surface"),
+and support load lands on a single-operator team (R-1). Options: (a) markdown in this repo rendered
+by the console; (b) an external docs site/CMS; (c) a hosted service (GitBook/Notion).
+**Decision:** **(a)** — articles are markdown files under `console/content/kb/` with a small
+frontmatter header (`title`, `category`, `order`, `summary`), read at render time by the console's
+`/kb` routes (index with category grouping + client-side search, `/kb/[slug]` per article). This is
+the docs-first rule applied to *user* docs: content ships in the same PR as the feature, is
+reviewed like code, and versions with the API it documents. The KB is publicly readable — no
+session required — because help must be reachable precisely when sign-in is the user's problem.
+Rendering uses `marked` server-side; content is repo-authored (trusted), so no sanitizer layer is
+added — **external/user-generated markdown must never be rendered through this path**.
+**Alternatives:** external docs site (rejected for now — a second deploy artifact and a place for
+docs to drift; revisit at external-tenant GA when SEO/versioned-docs pressure justifies it);
+CMS/hosted (rejected — content off-repo breaks the docs-first discipline).
+**Consequences:** the console is the single deploy for product + help; KB articles are a
+phase-gate checklist item alongside CHANGELOG entries; a future docs site can consume the same
+markdown (frontmatter is tool-agnostic).
+
 ---
 
 ## Open questions — **all answered by owner, 2026-07-17**

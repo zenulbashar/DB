@@ -97,7 +97,9 @@ Built and live-wired (console read surface + create/manage):
   (the form-control §3 gap's first slice).
 - **Screens:** connect (§4 auth), projects dashboard, **new project** (with the one-time
   owner-credential reveal panel), project overview (branch list + endpoints + connection panel) with
-  **branch create + suspend/resume/resize** actions (server actions + client controls, state-driven).
+  **branch create + suspend/resume/resize** actions (server actions + client controls, state-driven),
+  and the **knowledge base** (`/kb` index with search + article pages, `.kb-prose` typography —
+  ADR-017).
 
 Not yet built (later Phase 3 slices): `DataTable`, `Modal/Drawer`, `Toast`, `Tabs`, `Tooltip`,
 `Textarea`/`Combobox`, skeleton loaders, charts, the SQL editor, read-replica endpoint creation, and

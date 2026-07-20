@@ -24,13 +24,21 @@ export default async function RootLayout({
             <span className="rounded-pill border border-forest-edge px-2 py-0.5 text-xs text-fg-muted">
               console
             </span>
-            {connected && (
-              <form action={signOut} className="ml-auto">
-                <button className="text-xs text-fg-muted transition-colors hover:text-fg">
-                  Sign out
-                </button>
-              </form>
-            )}
+            <div className="ml-auto flex items-center gap-4">
+              <Link
+                href="/kb"
+                className="text-xs text-fg-muted transition-colors hover:text-fg"
+              >
+                Help
+              </Link>
+              {connected && (
+                <form action={signOut}>
+                  <button className="text-xs text-fg-muted transition-colors hover:text-fg">
+                    Sign out
+                  </button>
+                </form>
+              )}
+            </div>
           </div>
         </header>
         <main className="mx-auto max-w-6xl px-6 py-10">{children}</main>

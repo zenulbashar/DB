@@ -2,6 +2,33 @@
 
 All notable changes to this repository. Format loosely follows [Keep a Changelog](https://keepachangelog.com/); one entry per phase gate plus notable intermediate merges.
 
+## [Phase 3 — in-product knowledge base] — 2026-07-20
+
+Self-serve help for every shipped feature, in the console.
+
+### Decided (ADR-017)
+- KB articles are **repo-authored markdown** (`console/content/kb/*.md`, frontmatter: title /
+  category / order / summary) rendered by the console at `/kb` — the docs-first rule applied to
+  user docs: content ships and versions with the feature it documents. Publicly readable (help must
+  be reachable when sign-in is the problem). Rendered server-side with `marked`; repo content only —
+  user-generated markdown must never be routed through this path.
+
+### Added
+- **17 articles** covering every shipped feature: getting started, using the console, projects,
+  branches & data forks (PITR `at`), endpoints ("which one do I use" + pooling caveats), connection
+  strings & the audited reveal, roles & databases, scale-to-zero, compute sizing & resize, read
+  replicas, backups & PITR (fork-first recovery workflow), imports (modes, state machine, human-gate
+  cutover), API keys & scopes, orgs & members, audit log, API basics (RFC 9457 errors, idempotency,
+  pagination), troubleshooting.
+- **`/kb`** index — category grouping + client-side search; **`/kb/[slug]`** article pages
+  (statically generated, hand-rolled `.kb-prose` typography on the token layer); persistent
+  **Help** link in the console header. Slug input is allow-listed (`^[a-z0-9-]+$`) so the file
+  loader can't traverse.
+
+### Verification
+- `tsc --noEmit` + `next build` clean (22 pages; all 17 articles SSG). Boot check: `/kb` serves
+  without a session; search filters live (Playwright); unknown slug and traversal attempts 404.
+
 ## [Phase 3 — console end-to-end verification + smoke harness] — 2026-07-19
 
 The three console increments (read surface, branch management, project creation) were verified
