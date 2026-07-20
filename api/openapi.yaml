@@ -24,6 +24,7 @@ tags:
   - name: branches
   - name: imports
   - name: audit
+  - name: admin
 
 paths:
   /healthz:
@@ -1014,12 +1015,193 @@ paths:
         "404": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
 
+  /admin/overview:
+    get:
+      tags: [admin]
+      operationId: adminOverview
+      security: [{ adminToken: [] }]
+      summary: Whole-platform snapshot (operator only)
+      description: >
+        Platform totals across all tenants (ADR-018). Authenticated by the
+        dedicated `NDB_ADMIN_TOKEN`; the surface is disabled entirely when the
+        token is unset. Never reachable with a tenant API key.
+      responses:
+        "200":
+          description: Platform overview
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminOverview" }
+        "401": { $ref: "#/components/responses/Problem" }
+
+  /admin/orgs:
+    get:
+      tags: [admin]
+      operationId: adminListOrgs
+      security: [{ adminToken: [] }]
+      summary: Per-tenant usage inventory (operator only)
+      description: >
+        Every organization with its resource inventory, allocated compute, and
+        last observed activity. v1 "usage" is the control plane's honest
+        inventory; metered billing usage arrives with the Phase 7 pipeline.
+      responses:
+        "200":
+          description: Org usage rows, oldest org first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/OrgUsage" }
+                required: [data]
+        "401": { $ref: "#/components/responses/Problem" }
+
+  /admin/branches:
+    get:
+      tags: [admin]
+      operationId: adminListBranches
+      security: [{ adminToken: [] }]
+      summary: List branches across all tenants (operator only)
+      parameters:
+        - name: state
+          in: query
+          schema: { $ref: "#/components/schemas/ResourceState" }
+          description: Filter to one state (e.g. `error` to find stuck resources).
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 200 }
+      responses:
+        "200":
+          description: Branches with tenant context, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/AdminBranch" }
+                required: [data]
+        "401": { $ref: "#/components/responses/Problem" }
+
+  /admin/audit-log:
+    get:
+      tags: [admin]
+      operationId: adminRecentAudit
+      security: [{ adminToken: [] }]
+      summary: Recent audit entries across all organizations (operator only)
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        "200":
+          description: Audit entries, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/AuditEntry" }
+                required: [data]
+        "401": { $ref: "#/components/responses/Problem" }
+
+  /admin/branches/{br}/suspend:
+    parameters:
+      - name: br
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [admin]
+      operationId: adminSuspendBranch
+      security: [{ adminToken: [] }]
+      summary: Operator fix action — suspend any tenant's branch
+      description: >
+        Resolves the branch's org and drives the SAME tenant state machine as
+        `POST /branches/{br}/suspend` (identical 409 semantics — no bypass).
+        The action is written to the affected tenant's audit log
+        (`actor_type: system`, `actor_id: platform_admin`).
+      responses:
+        "200":
+          description: Branch (now suspending or already suspended)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Branch" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+
+  /admin/branches/{br}/resume:
+    parameters:
+      - name: br
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [admin]
+      operationId: adminResumeBranch
+      security: [{ adminToken: [] }]
+      summary: Operator fix action — resume any tenant's branch
+      description: Same semantics as the tenant resume; tenant-audit-logged.
+      responses:
+        "200":
+          description: Branch (now resuming or already ready)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Branch" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+
+  /admin/branches/{br}/resize:
+    parameters:
+      - name: br
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [admin]
+      operationId: adminResizeBranch
+      security: [{ adminToken: [] }]
+      summary: Operator fix action — resize any tenant's branch
+      description: Same clamp/state semantics as the tenant resize; tenant-audit-logged.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                cu: { type: number, minimum: 0.25, maximum: 8 }
+              required: [cu]
+      responses:
+        "200":
+          description: Branch (now resizing or already at size)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Branch" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+
 components:
   securitySchemes:
     apiKey:
       type: http
       scheme: bearer
       bearerFormat: "ndb_<64 hex chars>"
+    adminToken:
+      type: http
+      scheme: bearer
+      description: >
+        Platform-operator token (`NDB_ADMIN_TOKEN`, ADR-018). Grants the
+        /admin surface only; it is not an `ndb_` tenant key and tenant keys
+        never open /admin.
 
   parameters:
     org:
@@ -1292,6 +1474,60 @@ components:
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
       required: [id, project_id, target_branch_id, source_kind, mode, state, error, created_at, updated_at]
+
+    AdminOverview:
+      type: object
+      description: Whole-platform totals for the operator (ADR-018).
+      properties:
+        orgs: { type: integer }
+        users: { type: integer }
+        projects: { type: integer }
+        branches: { type: integer }
+        branches_by_state:
+          type: object
+          additionalProperties: { type: integer }
+        endpoints: { type: integer }
+        imports_by_state:
+          type: object
+          additionalProperties: { type: integer }
+        active_api_keys: { type: integer }
+        allocated_cu:
+          type: number
+          description: Sum of effective CU over branches currently holding compute.
+      required: [orgs, users, projects, branches, branches_by_state, endpoints,
+                 imports_by_state, active_api_keys, allocated_cu]
+
+    OrgUsage:
+      type: object
+      description: One tenant's resource inventory and activity recency.
+      properties:
+        org: { $ref: "#/components/schemas/Org" }
+        members: { type: integer }
+        projects: { type: integer }
+        branches: { type: integer }
+        branches_by_state:
+          type: object
+          additionalProperties: { type: integer }
+        endpoints: { type: integer }
+        active_api_keys: { type: integer }
+        imports_running: { type: integer }
+        allocated_cu: { type: number }
+        last_active_at:
+          type: [string, "null"]
+          format: date-time
+          description: Most recent gateway-observed activity across the org's branches.
+      required: [org, members, projects, branches, branches_by_state, endpoints,
+                 active_api_keys, imports_running, allocated_cu, last_active_at]
+
+    AdminBranch:
+      allOf:
+        - $ref: "#/components/schemas/Branch"
+        - type: object
+          properties:
+            org_id: { type: string }
+            org_name: { type: string }
+            project_name: { type: string }
+          required: [org_id, org_name, project_name]
 
     AuditEntry:
       type: object

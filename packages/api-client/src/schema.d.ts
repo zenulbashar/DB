@@ -597,6 +597,146 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Whole-platform snapshot (operator only)
+         * @description Platform totals across all tenants (ADR-018). Authenticated by the dedicated `NDB_ADMIN_TOKEN`; the surface is disabled entirely when the token is unset. Never reachable with a tenant API key.
+         */
+        get: operations["adminOverview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/orgs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Per-tenant usage inventory (operator only)
+         * @description Every organization with its resource inventory, allocated compute, and last observed activity. v1 "usage" is the control plane's honest inventory; metered billing usage arrives with the Phase 7 pipeline.
+         */
+        get: operations["adminListOrgs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/branches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List branches across all tenants (operator only) */
+        get: operations["adminListBranches"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/audit-log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Recent audit entries across all organizations (operator only) */
+        get: operations["adminRecentAudit"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/branches/{br}/suspend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                br: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Operator fix action — suspend any tenant's branch
+         * @description Resolves the branch's org and drives the SAME tenant state machine as `POST /branches/{br}/suspend` (identical 409 semantics — no bypass). The action is written to the affected tenant's audit log (`actor_type: system`, `actor_id: platform_admin`).
+         */
+        post: operations["adminSuspendBranch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/branches/{br}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                br: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Operator fix action — resume any tenant's branch
+         * @description Same semantics as the tenant resume; tenant-audit-logged.
+         */
+        post: operations["adminResumeBranch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/branches/{br}/resize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                br: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Operator fix action — resize any tenant's branch
+         * @description Same clamp/state semantics as the tenant resize; tenant-audit-logged.
+         */
+        post: operations["adminResizeBranch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -770,6 +910,47 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        /** @description Whole-platform totals for the operator (ADR-018). */
+        AdminOverview: {
+            orgs: number;
+            users: number;
+            projects: number;
+            branches: number;
+            branches_by_state: {
+                [key: string]: number;
+            };
+            endpoints: number;
+            imports_by_state: {
+                [key: string]: number;
+            };
+            active_api_keys: number;
+            /** @description Sum of effective CU over branches currently holding compute. */
+            allocated_cu: number;
+        };
+        /** @description One tenant's resource inventory and activity recency. */
+        OrgUsage: {
+            org: components["schemas"]["Org"];
+            members: number;
+            projects: number;
+            branches: number;
+            branches_by_state: {
+                [key: string]: number;
+            };
+            endpoints: number;
+            active_api_keys: number;
+            imports_running: number;
+            allocated_cu: number;
+            /**
+             * Format: date-time
+             * @description Most recent gateway-observed activity across the org's branches.
+             */
+            last_active_at: string | null;
+        };
+        AdminBranch: components["schemas"]["Branch"] & {
+            org_id: string;
+            org_name: string;
+            project_name: string;
         };
         AuditEntry: {
             id: string;
@@ -2031,6 +2212,184 @@ export interface operations {
                     "application/json": components["schemas"]["Endpoint"];
                 };
             };
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+        };
+    };
+    adminOverview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Platform overview */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminOverview"];
+                };
+            };
+            401: components["responses"]["Problem"];
+        };
+    };
+    adminListOrgs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Org usage rows, oldest org first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OrgUsage"][];
+                    };
+                };
+            };
+            401: components["responses"]["Problem"];
+        };
+    };
+    adminListBranches: {
+        parameters: {
+            query?: {
+                /** @description Filter to one state (e.g. `error` to find stuck resources). */
+                state?: components["schemas"]["ResourceState"];
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Branches with tenant context, newest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AdminBranch"][];
+                    };
+                };
+            };
+            401: components["responses"]["Problem"];
+        };
+    };
+    adminRecentAudit: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audit entries, newest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AuditEntry"][];
+                    };
+                };
+            };
+            401: components["responses"]["Problem"];
+        };
+    };
+    adminSuspendBranch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                br: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Branch (now suspending or already suspended) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Branch"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+        };
+    };
+    adminResumeBranch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                br: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Branch (now resuming or already ready) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Branch"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+        };
+    };
+    adminResizeBranch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                br: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    cu: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Branch (now resizing or already at size) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Branch"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
             409: components["responses"]["Problem"];
         };

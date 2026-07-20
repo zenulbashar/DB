@@ -152,7 +152,19 @@ pooled connection) with: `statement_timeout` (10 s default), row cap (10k), resu
 audit-logged (statement text is tenant-authored, treated as sensitive, retained 30 days).
 Rationale: the browser never holds durable DB credentials.
 
-## 7. Compatibility posture
+## 7. Platform-operator surface (`/v1/admin/*`, ADR-018)
+
+Cross-tenant, operator-only; authenticated by `NDB_ADMIN_TOKEN` (never a tenant key; disabled
+when unset). Reads: `GET /admin/overview` (platform totals + branch/import state histograms +
+allocated CU), `GET /admin/orgs` (per-tenant usage inventory incl. `last_active_at`),
+`GET /admin/branches?state=…` (find stuck resources, with org/project context),
+`GET /admin/audit-log` (cross-org feed). Fix actions `POST /admin/branches/{br}/{suspend,resume,
+resize}` resolve the branch's org and reuse the tenant state machine (identical 409 semantics),
+and are written to the affected tenant's audit log as `system`/`platform_admin` — operator
+interventions are tenant-visible. v1 deliberately excludes destructive operations and plan
+overrides; "usage" is inventory + allocated CU until the Phase 7 metering pipeline.
+
+## 8. Compatibility posture
 
 Where a concept has an obvious Neon analogue (projects/branches/endpoints, pooled vs direct),
 we keep the shapes close enough that migration tooling and tenant mental models transfer, but we

@@ -296,14 +296,7 @@ func (s *Store) ResizeBranch(ctx context.Context, orgID, branchID string, target
 // the org-scoped ResumeBranch so the transition logic lives in exactly one
 // place (ADR-014: the gateway wake and the human resume converge).
 func (s *Store) WakeBranchByID(ctx context.Context, branchID string) (*domain.Branch, error) {
-	var orgID string
-	err := s.withPrivTx(ctx, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx,
-			`SELECT org_id FROM branches WHERE id = $1 AND state <> 'deleting'`, branchID).Scan(&orgID)
-	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, store.ErrNotFound
-	}
+	orgID, err := s.ResolveBranchOrg(ctx, branchID)
 	if err != nil {
 		return nil, err
 	}
