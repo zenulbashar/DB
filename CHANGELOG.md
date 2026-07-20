@@ -2,6 +2,43 @@
 
 All notable changes to this repository. Format loosely follows [Keep a Changelog](https://keepachangelog.com/); one entry per phase gate plus notable intermediate merges.
 
+## [Admin API — platform-operator surface] — 2026-07-20
+
+The Phase 7 "admin portal" backend pulled forward as an honest v1 (ADR-018): the operator can see
+the whole platform, see which tenant uses what, and fix tenant issues.
+
+### Decided (ADR-018)
+- `/v1/admin/*` is authenticated by a dedicated **`NDB_ADMIN_TOKEN`** (bootstrap/gateway-token
+  pattern: constant-time compare, surface disabled entirely when unset). Tenant keys never open
+  `/admin`; the admin token opens nothing else. Reads use the store's privileged path — tenant RLS
+  stays intact for every tenant credential. **Fix actions are the tenant state machine, not a
+  bypass**, and every one is written to the affected tenant's audit log
+  (`actor_type: system`, `actor_id: platform_admin`) — operator interventions are tenant-visible.
+  Interim until Phase 7 operator RBAC; tracked as **R-17**.
+
+### Added
+- **Reads:** `GET /admin/overview` (org/user/project/branch/endpoint/key totals, branch+import
+  state histograms, **allocated CU** — the sum of effective CU over compute-holding branches);
+  `GET /admin/orgs` (per-tenant inventory: members, projects, branches by state, endpoints, active
+  keys, running imports, allocated CU, `last_active_at` from gateway activity);
+  `GET /admin/branches?state=` (find stuck/error resources, with org+project context);
+  `GET /admin/audit-log` (cross-org feed). v1 "usage" is deliberately inventory — metered usage
+  arrives with the Phase 7 pipeline.
+- **Fix actions:** `POST /admin/branches/{br}/{suspend,resume,resize}` — resolve the branch's org
+  (`ResolveBranchOrg`, now also backing the gateway wake) and drive the same org-scoped
+  transitions tenants use (identical 409 semantics).
+- Spec-first: `api/openapi.yaml` admin tag + `adminToken` scheme + `AdminOverview`/`OrgUsage`/
+  `AdminBranch` schemas; TS client regenerated. Store: `postgres/admin.go` (SQL aggregates) +
+  `memory/admin.go` (mirror). Server: dedicated route group outside tenant auth.
+
+### Tests
+- Server (memory): tenant keys/wrong/empty tokens 401, disabled surface 401; overview + org-usage
+  counts; state-filtered branch list with tenant context; fix actions drive the state machine
+  (409 from provisioning, suspend/resume/resize flips) and land in the tenant's audit log as
+  `system`/`platform_admin`; 400 on bad resize; 404 on unknown branch. Postgres integration:
+  the same aggregates against real SQL incl. allocated-CU drop after suspend and seeded
+  `last_active_at`. Full unit + integration suites green.
+
 ## [Phase 3 — in-product knowledge base] — 2026-07-20
 
 Self-serve help for every shipped feature, in the console.

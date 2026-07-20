@@ -49,7 +49,15 @@
   `branch.wake`).
 - **Platform operators:** SSO + MFA; role-based (admin portal roles: support-read,
   operator, security); production kubectl access via short-lived certs through an audited
-  bastion flow, alarmed by default.
+  bastion flow, alarmed by default. **Exception (interim, ADR-018):** until operator RBAC lands
+  (Phase 7), the operator surface (`/v1/admin/*` + admin console) authenticates with a single
+  shared bearer token (`NDB_ADMIN_TOKEN`, bootstrap-token shape, constant-time compared; the
+  surface is disabled entirely when unset). It is a high-value secret (R-17): reads are
+  privileged cross-tenant aggregates; fix actions reuse the tenant state machine and are written
+  to the affected tenant's audit log (`actor_type: system`, `actor_id: platform_admin`), so
+  operator interventions are tenant-visible. Tenant `ndb_` keys can never open `/admin`, and the
+  admin token opens nothing else. Destructive operations (tenant deletes, plan overrides) are
+  excluded from the v1 surface by design.
 
 ## 4. Authorization
 

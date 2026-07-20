@@ -215,6 +215,32 @@ CMS/hosted (rejected — content off-repo breaks the docs-first discipline).
 phase-gate checklist item alongside CHANGELOG entries; a future docs site can consume the same
 markdown (frontmatter is tool-agnostic).
 
+## ADR-018 · Platform-operator (admin) surface: a token-guarded `/v1/admin/*` API with cross-tenant reads and audited tenant-visible fix actions — `accepted`
+**Context:** The operator needs to see the whole platform (which tenant uses what, what's stuck)
+and fix tenant issues — the Phase 7 "admin portal" pulled forward as a v1, because operating
+Phases 2–4 already requires it. Tenant API keys can't serve this: they are org-scoped by RLS, and
+that isolation must stay intact. Options for operator identity: (a) a dedicated shared token
+(`NDB_ADMIN_TOKEN`, the bootstrap/gateway-token pattern); (b) an `is_platform_admin` flag on API
+keys; (c) full operator RBAC with its own principals.
+**Decision:** **(a)** for v1 — a separate `/v1/admin/*` route group authenticated by
+`NDB_ADMIN_TOKEN` (constant-time compare; the entire surface is **disabled when the token is
+unset**, and it is never set in tenant-key form). Admin reads use the store's privileged path
+(`app.privileged`, the same seam the reconciler and gateway wake use) — RLS stays enforced for
+every tenant credential. **Fix actions are the tenant state machine, not a bypass:** admin
+suspend/resume/resize resolve the branch's org and call the same org-scoped transitions, so no new
+mutation semantics exist. Every admin action is written to **the affected tenant's audit log**
+(`actor_type: system`, `actor_id: platform_admin`) — operator interventions are tenant-visible by
+construction (SECURITY_MODEL §6). "Usage" in v1 is the honest inventory the control plane already
+knows — resource counts, allocated CU, activity recency, import volume — not metered billing usage,
+which arrives with the Phase 7 pipeline.
+**Alternatives:** flag on API keys (rejected — a tenant credential that can cross tenants is
+exactly the confused-deputy shape RLS exists to prevent); operator RBAC (right end-state, Phase 7 —
+premature while the operator team is one person).
+**Consequences:** a new high-value secret (R-17: rotate it, never ship it to tenant contexts; the
+admin console keeps it in an httpOnly cookie like the tenant key). The admin API is additive and
+read-mostly; destructive operations (deleting tenant resources, plan overrides) are deliberately
+excluded from v1. When operator RBAC lands, the token dies and the routes stay.
+
 ---
 
 ## Open questions — **all answered by owner, 2026-07-17**

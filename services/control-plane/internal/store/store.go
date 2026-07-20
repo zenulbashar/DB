@@ -242,6 +242,26 @@ type Store interface {
 	AppendAudit(ctx context.Context, e domain.AuditEntry) error
 	ListAudit(ctx context.Context, orgID string, pg Page) ([]domain.AuditEntry, string, error)
 
+	// --- platform-operator (admin) surface (ADR-018) ---
+	// PRIVILEGED cross-tenant reads for the NDB_ADMIN_TOKEN admin API only —
+	// never reachable through a tenant credential. Fix actions do NOT live
+	// here: the admin server resolves the branch's org (ResolveBranchOrg) and
+	// drives the same org-scoped state machine as tenants.
+
+	// AdminOverview aggregates whole-platform counts and compute footprint.
+	AdminOverview(ctx context.Context) (*domain.AdminOverview, error)
+	// AdminListOrgUsage returns every org with its resource inventory,
+	// allocated CU, and last observed activity, ordered by creation.
+	AdminListOrgUsage(ctx context.Context) ([]domain.OrgUsage, error)
+	// AdminListBranches lists live branches (optionally filtered to one state)
+	// with tenant context, newest first, capped at limit.
+	AdminListBranches(ctx context.Context, state string, limit int) ([]domain.AdminBranch, error)
+	// AdminRecentAudit returns the newest audit entries across all orgs.
+	AdminRecentAudit(ctx context.Context, limit int) ([]domain.AuditEntry, error)
+	// ResolveBranchOrg maps a branch ID to its owning org (ErrNotFound if
+	// missing/deleting) so admin fix actions can reuse org-scoped transitions.
+	ResolveBranchOrg(ctx context.Context, branchID string) (string, error)
+
 	// --- idempotency (API_SPECIFICATION §1) ---
 	GetIdempotent(ctx context.Context, orgID, route, key string) (*IdempotentResponse, error)
 	PutIdempotent(ctx context.Context, orgID, route, key string, resp IdempotentResponse, expires time.Time) error

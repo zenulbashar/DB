@@ -177,6 +177,26 @@ func (s *Store) ReportGatewayActivity(_ context.Context, gatewayID string, count
 
 // WakeBranchByID resolves the branch's org, then reuses ResumeBranch (mirrors
 // the postgres store; the privileged cross-tenant wake path — ADR-014).
+// TestForceBranchState jumps a branch (and its endpoints) to a state without
+// walking the state machine. TEST HOOK ONLY — this package is the unit-test
+// store; production stores have no equivalent.
+func (s *Store) TestForceBranchState(brID string, st domain.ResourceState) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	b, ok := s.branches[brID]
+	if !ok {
+		return
+	}
+	b.State = st
+	s.branches[brID] = b
+	for id, ep := range s.endpoints {
+		if ep.BranchID == brID {
+			ep.State = st
+			s.endpoints[id] = ep
+		}
+	}
+}
+
 func (s *Store) WakeBranchByID(ctx context.Context, branchID string) (*domain.Branch, error) {
 	s.mu.Lock()
 	b, ok := s.branches[branchID]

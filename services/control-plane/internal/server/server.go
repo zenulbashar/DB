@@ -22,7 +22,10 @@ type Config struct {
 	// (POST /internal/branches/{br}/wake; ADR-014). Empty disables the entire
 	// /internal surface (SECURITY_MODEL §3).
 	GatewayToken string
-	Version      string
+	// AdminToken authenticates the platform-operator surface (/v1/admin/*;
+	// ADR-018). Empty disables it entirely. Never a tenant credential.
+	AdminToken string
+	Version    string
 	// Keyring encrypts tenant secret material (SECURITY_MODEL §5). Required.
 	Keyring *secrets.Keyring
 }
@@ -63,8 +66,29 @@ func (s *Server) routes() {
 	})
 
 	s.mux.Route("/v1", func(r chi.Router) {
-		r.Use(s.authenticate)
+		// Platform-operator surface (ADR-018): authenticated by the dedicated
+		// admin token, NOT tenant API keys — so it sits outside the
+		// s.authenticate group. Disabled entirely when NDB_ADMIN_TOKEN is unset.
+		r.Route("/admin", func(r chi.Router) {
+			r.Get("/overview", s.authenticateAdmin(s.handleAdminOverview))
+			r.Get("/orgs", s.authenticateAdmin(s.handleAdminOrgs))
+			r.Get("/branches", s.authenticateAdmin(s.handleAdminBranches))
+			r.Get("/audit-log", s.authenticateAdmin(s.handleAdminAudit))
+			r.Post("/branches/{br}/suspend", s.authenticateAdmin(s.handleAdminBranchAction("suspend")))
+			r.Post("/branches/{br}/resume", s.authenticateAdmin(s.handleAdminBranchAction("resume")))
+			r.Post("/branches/{br}/resize", s.authenticateAdmin(s.handleAdminBranchAction("resize")))
+		})
 
+		r.Group(func(r chi.Router) {
+			r.Use(s.authenticate)
+
+			s.tenantRoutes(r)
+		})
+	})
+}
+
+func (s *Server) tenantRoutes(r chi.Router) {
+	{
 		r.Get("/orgs", s.requireScope(domain.ScopeOrgsRead, s.handleListOrgs))
 		r.Route("/orgs/{org}", func(r chi.Router) {
 			r.Get("/", s.requireScope(domain.ScopeOrgsRead, s.handleGetOrg))
@@ -119,7 +143,7 @@ func (s *Server) routes() {
 			r.Post("/databases", s.requireScope(domain.ScopeRolesWrite, s.idempotent(s.handleCreateDatabase)))
 			r.Delete("/databases/{db}", s.requireScope(domain.ScopeRolesWrite, s.handleDeleteDatabase))
 		})
-	})
+	}
 }
 
 // orgFromPath authorizes the {org} path parameter against the principal's org.
