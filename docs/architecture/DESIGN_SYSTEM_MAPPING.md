@@ -100,6 +100,11 @@ Built and live-wired (console read surface + create/manage):
   **branch create + suspend/resume/resize** actions (server actions + client controls, state-driven),
   and the **knowledge base** (`/kb` index with search + article pages, `.kb-prose` typography —
   ADR-017).
+- **Operator shell** (`/admin`, ADR-018) — §4's "separate app shell, same primitives, visually
+  distinct chrome" realized early: neutral surface header + amber `operator` badge instead of the
+  forest brand; stat tiles, state histograms (status dots + labels — never color alone), tenants
+  usage table, needs-attention panel, cross-tenant audit feed, and branch fix actions. Route
+  groups split the two shells; sessions (cookies) are fully separate.
 
 Not yet built (later Phase 3 slices): `DataTable`, `Modal/Drawer`, `Toast`, `Tabs`, `Tooltip`,
 `Textarea`/`Combobox`, skeleton loaders, charts, the SQL editor, read-replica endpoint creation, and

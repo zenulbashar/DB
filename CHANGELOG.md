@@ -2,6 +2,37 @@
 
 All notable changes to this repository. Format loosely follows [Keep a Changelog](https://keepachangelog.com/); one entry per phase gate plus notable intermediate merges.
 
+## [Admin console — operator UI] — 2026-07-20
+
+The operator UI over the admin API (ADR-018): see the whole platform, see which tenant uses what,
+and fix tenant issues — from a browser.
+
+### Added
+- **Two shells, one app** — the console is restructured into route groups: the tenant console
+  keeps the forest brand chrome under `(console)/`; **`/admin`** gets a visually distinct neutral
+  "operator" chrome (DESIGN_SYSTEM_MAPPING §4's admin-portal note, realized early). Sessions are
+  fully separate: the operator token lives in its own httpOnly cookie (`ndb_admin`, 12 h), and
+  neither cookie opens the other surface.
+- **Operator sign-in** (`/admin/connect`) — validates the pasted `NDB_ADMIN_TOKEN` against
+  `GET /admin/overview` before persisting; wrong tokens are rejected at the form.
+- **Platform overview** (`/admin`) — stat tiles (orgs, users, projects, branches, allocated CU,
+  active keys), branch/import state histograms (status dots + labels, no color-alone), a
+  **needs-attention** panel (branches in `error`), the **tenants table** (per-org members,
+  projects, branches, CU, keys, running imports, last activity), and the cross-tenant audit feed.
+- **Branches** (`/admin/branches`) — every tenant branch with org/project context, state filter
+  pills, and **fix actions** (suspend/resume/resize) that drive the audited admin endpoints. An
+  `error` branch deliberately shows "no legal transition" instead of a button that would 409.
+
+### Verified (live, real browser)
+- Signed in through the operator form; dashboard rendered live platform data; **suspended a
+  tenant branch through the UI** → backend flipped it `ready → suspending` via the tenant state
+  machine, and the **tenant's own audit log** (fetched with the tenant key) shows
+  `branch.suspend · system/platform_admin` — the tenant-visible-interventions property, end to end.
+- Wrong operator token rejected at the form; `/admin` without a session 307s to `/admin/connect`;
+  a tenant key 401s on `/admin`; the admin cookie does not open the tenant console.
+- Tenant console + KB regression-checked after the route-group restructure; `tsc` + `next build`
+  clean (26 pages).
+
 ## [Admin API — platform-operator surface] — 2026-07-20
 
 The Phase 7 "admin portal" backend pulled forward as an honest v1 (ADR-018): the operator can see
