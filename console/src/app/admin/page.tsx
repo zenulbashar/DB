@@ -103,6 +103,16 @@ export default async function AdminHome() {
         </Card>
       </div>
 
+      {overview.restore_verify_failures > 0 && (
+        <ErrorNote>
+          <strong>{overview.restore_verify_failures}</strong> branch
+          {overview.restore_verify_failures === 1 ? " has" : "es have"} a{" "}
+          <strong>failed restore verification</strong> — the backup archive may
+          be unrestorable. Treat as a data-durability page (R-2), not a
+          dashboard row.
+        </ErrorNote>
+      )}
+
       {attention.length > 0 && (
         <Card title={`Needs attention — ${attention.length} branch(es) in error`}>
           <ul className="space-y-2">

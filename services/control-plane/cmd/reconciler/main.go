@@ -90,6 +90,40 @@ func main() {
 		_ = s.ListenAndServe()
 	}()
 
+	// Restore-verification loop (R-2): opt-in via NDB_VERIFY_INTERVAL (e.g.
+	// "24h"); needs an archive to verify, so it also requires backups on.
+	if v := os.Getenv("NDB_VERIFY_INTERVAL"); v != "" && backup != nil {
+		verifyEvery, err := time.ParseDuration(v)
+		if err != nil || verifyEvery <= 0 {
+			log.Error("bad NDB_VERIFY_INTERVAL", "value", v)
+			os.Exit(1)
+		}
+		verifyTimeout := 30 * time.Minute
+		if tv := os.Getenv("NDB_VERIFY_TIMEOUT"); tv != "" {
+			if d, err := time.ParseDuration(tv); err == nil && d > 0 {
+				verifyTimeout = d
+			}
+		}
+		// Settle/start checks run every reconcile-ish tick; verifyEvery is the
+		// per-branch re-verification window, not the loop cadence.
+		go func() {
+			tick := time.NewTicker(interval * 6)
+			defer tick.Stop()
+			log.Info("restore-verification loop running",
+				"every", verifyEvery.String(), "timeout", verifyTimeout.String())
+			for {
+				if err := engine.VerifyRestores(ctx, verifyEvery, verifyTimeout); err != nil {
+					log.Error("restore verification pass", "err", err)
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-tick.C:
+				}
+			}
+		}()
+	}
+
 	log.Info("reconciler running", "interval", interval.String())
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()

@@ -36,6 +36,11 @@ type Source interface {
 	// SweepIdleBranches flips globally-idle ready branches to suspending
 	// (ADR-015); staleWindow bounds which gateway activity reports still count.
 	SweepIdleBranches(ctx context.Context, staleWindow time.Duration) ([]string, error)
+	// Restore verification (R-2): the verify loop's ledger.
+	ListRestoreVerifyDue(ctx context.Context, every time.Duration, limit int) ([]postgres.BranchWork, error)
+	StartRestoreVerification(ctx context.Context, branchID string) error
+	FinishRestoreVerification(ctx context.Context, branchID string, pass bool, message string) error
+	ListRunningRestoreVerifications(ctx context.Context) ([]postgres.RestoreVerification, error)
 }
 
 // defaultIdleStaleWindow bounds how recently a gateway must have reported for

@@ -29,6 +29,11 @@ type fakeSource struct {
 	tornDown       []string
 	sweptIdle      []string
 	liveCount      map[string]int
+	// Restore verification (R-2).
+	verifyDue      []postgres.BranchWork
+	verifyRunning  []postgres.RestoreVerification
+	verifyStarted  []string
+	verifyOutcomes map[string]string // branchID -> "pass"/"fail: <msg>"
 }
 
 func (f *fakeSource) ListReconcileWork(context.Context) ([]postgres.BranchWork, error) {
@@ -66,6 +71,27 @@ func (f *fakeSource) ListRoutableEndpoints(context.Context) ([]postgres.Routable
 }
 func (f *fakeSource) SweepIdleBranches(context.Context, time.Duration) ([]string, error) {
 	return f.sweptIdle, nil
+}
+func (f *fakeSource) ListRestoreVerifyDue(context.Context, time.Duration, int) ([]postgres.BranchWork, error) {
+	return f.verifyDue, nil
+}
+func (f *fakeSource) StartRestoreVerification(_ context.Context, id string) error {
+	f.verifyStarted = append(f.verifyStarted, id)
+	return nil
+}
+func (f *fakeSource) FinishRestoreVerification(_ context.Context, id string, pass bool, msg string) error {
+	if f.verifyOutcomes == nil {
+		f.verifyOutcomes = map[string]string{}
+	}
+	if pass {
+		f.verifyOutcomes[id] = "pass"
+	} else {
+		f.verifyOutcomes[id] = "fail: " + msg
+	}
+	return nil
+}
+func (f *fakeSource) ListRunningRestoreVerifications(context.Context) ([]postgres.RestoreVerification, error) {
+	return f.verifyRunning, nil
 }
 
 func testWork(state domain.ResourceState, role domain.BranchRole) postgres.BranchWork {

@@ -2,6 +2,33 @@
 
 All notable changes to this repository. Format loosely follows [Keep a Changelog](https://keepachangelog.com/); one entry per phase gate plus notable intermediate merges.
 
+## [Resilience — restore-verification loop] — 2026-07-20
+
+R-2's "automated restore-verification" stops being a doc promise: the reconciler now proves
+archives restore, on a cadence.
+
+### Added
+- **Verify loop** (`Engine.VerifyRestores`, opt-in via `NDB_VERIFY_INTERVAL`, e.g. `24h`;
+  per-verification timeout `NDB_VERIFY_TIMEOUT`, default 30 m): for each ready branch whose
+  archive hasn't been verified inside the window, restore its WAL archive into an **ephemeral
+  recovery clone** beside the branch (same namespace — where the archive credentials live;
+  `-verify` suffix; archiving stripped so the clone can't write into the source stream), record
+  the outcome, tear the clone down. Crash-safe in the reconciler's own style: the
+  `restore_verifications` ledger (migration `0011`) is written before the clone is created, so a
+  crash between the two settles as a timeout **fail**, never a silent skip.
+- **Failures are a page:** `AdminOverview` gains `restore_verify_failures`; the admin console
+  shows a data-durability warning when it's non-zero. Spec + TS client regenerated.
+- Store: `ListRestoreVerifyDue` / `StartRestoreVerification` / `FinishRestoreVerification` /
+  `ListRunningRestoreVerifications` (privileged, reconciler-facing).
+
+### Tests
+- Reconciler (fake k8s): due branch → clone created (recovery bootstrap, no archiving) + ledger
+  running; healthy clone → pass + teardown; timeout → fail citing R-2 + teardown; crash-window
+  row (no clone) settles by timeout, young one left alone; no-op without a backup config.
+- Postgres integration: the ledger against real SQL — due-listing excludes provisioning/running/
+  fresh branches, running-listing carries project context, fail counts in `AdminOverview`, pass
+  clears it, zero window re-dues. Full unit + integration suites green.
+
 ## [Resilience — gateway bounded dial retry] — 2026-07-20
 
 ### Added

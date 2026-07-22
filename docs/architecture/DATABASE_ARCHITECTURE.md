@@ -61,10 +61,16 @@ windows or immediate for scale-up; scale-to-zero per §7.
 - **PITR:** restore any branch to any timestamp/LSN within retention → materializes as a **new
   branch** (never in-place by default; "instant restore" promotes that branch's endpoints over
   the old ones so the connection string keeps working — endpoint promotion, not data overwrite).
-- **Verification (non-negotiable, R-2):** a nightly automated job restores a sampled backup into
-  a scratch namespace, runs `pg_verifybackup`-equivalent + smoke queries + row-count parity
-  checks, records the result as a metric with alerting. A backup that hasn't been restored is
-  assumed broken.
+- **Verification (non-negotiable, R-2):** the reconciler runs a **restore-verification loop**
+  (`NDB_VERIFY_INTERVAL`, e.g. `24h`; timeout `NDB_VERIFY_TIMEOUT`, default 30 m): for each ready
+  branch whose archive hasn't been verified within the window it restores the WAL archive into an
+  ephemeral recovery clone **beside the branch** (same namespace — that's where the archive
+  credentials live; `-verify` name suffix, archiving stripped so the clone can't write into the
+  source stream), records pass/fail in the `restore_verifications` ledger, and tears the clone
+  down. Failures surface on the admin console as a data-durability page (R-2). A backup that
+  hasn't been restored is assumed broken. Deeper checks (smoke queries, row-count parity against
+  the live branch) layer onto the same loop later — clone-reaches-healthy already proves the
+  archive restores.
 
 ## 4. Read replicas (Phase 4)
 
