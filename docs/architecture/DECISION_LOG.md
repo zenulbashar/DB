@@ -47,6 +47,13 @@ New ADRs are appended; superseding requires a link both ways.
 **Decision:** small Go proxy: parse startup/TLS, route, hold, count — **no protocol rewriting**; Traefik remains for HTTP only.
 **Consequences:** we own a data-path component (R-7): fuzzing, soak tests, canaries mandatory; it becomes the natural insertion point for Gen-2 features (quotas, read-write splitting) later. ADR-007 defines the *hold*; the wake *signal* transport is decided separately in ADR-014 (a single coalesced POST to the control-plane API — a bounded expansion of this "route, hold, count" scope, not a general API client or DB access).
 
+**Addendum (bounded dial retry).** The backend dial retries a failed attempt up to twice
+(250 ms / 500 ms backoff, aborted if the client hangs up) before answering `08006`: a CNPG
+failover or pod reschedule swaps a Service's endpoints within seconds, and erroring a client over
+a blip it would survive is worse than a sub-second wait. This is **not** load balancing or
+failover — the same single backend is retried; multi-backend selection stays out of scope
+(Gen-2). Observable via `pggw_backend_dial_retries_total`.
+
 ## ADR-008 · Compute stays Nimbus's domain; NimbusDB does databases — `accepted`
 **Context:** Roadmap lists serverless compute/functions; Nimbus already is the compute/hosting product with `site` and `agent` kinds.
 **Decision:** NimbusDB never runs tenant application compute. "Deploy Compute/API/Worker/Cron/Frontend" actions drive Nimbus via its REST API; workloads and databases stay loosely coupled (soft links, detachable) per SYSTEM_ARCHITECTURE §7.
