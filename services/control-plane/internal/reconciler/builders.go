@@ -240,17 +240,21 @@ func BuildNetworkPolicies(w postgres.BranchWork) []*unstructured.Unstructured {
 // matched by the ingress allow.
 func GatewayNamespaceLabel() string { return GatewayNamespace }
 
+// haTier reports whether the branch gets HA guarantees (ADR-019): production
+// role, or any branch serving a read endpoint (reads need a hot standby).
+func haTier(w postgres.BranchWork) bool {
+	return w.Branch.Role == domain.BranchProduction || hasReadEndpoint(w)
+}
+
 // BuildCluster renders the CNPG Cluster for a branch. Sizing: guaranteed QoS
 // at min CU in v1 (requests == limits; vertical autoscaling is Phase 4).
-// Instances by role: production 2 (streaming replica + failover), else 1.
-// A non-nil backup config attaches continuous WAL archiving + retention.
+// HA tier (ADR-019): 2 instances, synchronous replication with `preferred`
+// durability (RPO≈0 while the standby is healthy, degrades to async rather
+// than blocking writes when it isn't), replica-first controlled switchover on
+// upgrades. A non-nil backup config attaches continuous WAL archiving.
 func BuildCluster(w postgres.BranchWork, backup *BackupConfig) *unstructured.Unstructured {
 	instances := 1
-	if w.Branch.Role == domain.BranchProduction {
-		instances = 2
-	}
-	// A read endpoint needs at least one hot-standby replica to serve reads.
-	if hasReadEndpoint(w) && instances < 2 {
+	if haTier(w) {
 		instances = 2
 	}
 	// Sized from the branch's CURRENT CU (autoscaled between min/max), not min —
@@ -262,18 +266,30 @@ func BuildCluster(w postgres.BranchWork, backup *BackupConfig) *unstructured.Uns
 		"cpu":    fmt.Sprintf("%dm", cpuMilli),
 		"memory": fmt.Sprintf("%dMi", memMi),
 	}
-	spec := map[string]any{
-		"instances": int64(instances),
-		"imageName": fmt.Sprintf("ghcr.io/cloudnative-pg/postgresql:%d", w.PGVersion),
-		"storage":   map[string]any{"size": "5Gi"},
-		"resources": map[string]any{"requests": res, "limits": res},
-		"postgresql": map[string]any{
-			"parameters": map[string]any{
-				// pg_stat_statements from day one (query insights, Phase 7).
-				"shared_preload_libraries": "pg_stat_statements",
-			},
+	postgresql := map[string]any{
+		"parameters": map[string]any{
+			// pg_stat_statements from day one (query insights, Phase 7).
+			"shared_preload_libraries": "pg_stat_statements",
 		},
+	}
+	spec := map[string]any{
+		"instances":             int64(instances),
+		"imageName":             fmt.Sprintf("ghcr.io/cloudnative-pg/postgresql:%d", w.PGVersion),
+		"storage":               map[string]any{"size": "5Gi"},
+		"resources":             map[string]any{"requests": res, "limits": res},
+		"postgresql":            postgresql,
 		"enableSuperuserAccess": false,
+	}
+	if instances >= 2 {
+		// ADR-019: sync replication with preferred durability — the sole
+		// standby's loss degrades to async instead of blocking writes.
+		postgresql["synchronous"] = map[string]any{
+			"method":         "any",
+			"number":         int64(1),
+			"dataDurability": "preferred",
+		}
+		spec["primaryUpdateStrategy"] = "unsupervised"
+		spec["primaryUpdateMethod"] = "switchover"
 	}
 	if backup != nil {
 		spec["backup"] = backup.barmanSection(w)
@@ -298,17 +314,26 @@ func BuildCluster(w postgres.BranchWork, backup *BackupConfig) *unstructured.Uns
 	}}
 }
 
+// poolerInstances is the shared replica policy for both poolers: zero
+// alongside a hibernated cluster (a running pooler in front of one would just
+// refuse connects and burn a pod), two on the HA tier so a single pooler pod
+// restart doesn't sever every pooled connection (ADR-019), else one.
+func poolerInstances(w postgres.BranchWork) int64 {
+	switch {
+	case suspendedCompute(w.Branch.State):
+		return 0
+	case haTier(w):
+		return 2
+	default:
+		return 1
+	}
+}
+
 // BuildPooler renders the branch's transaction-mode PgBouncer
 // (DATABASE_ARCHITECTURE §5 — max_prepared_statements on for
 // extended-protocol clients like node-postgres/Drizzle).
 func BuildPooler(w postgres.BranchWork) *unstructured.Unstructured {
-	// Scale the pooler to zero alongside the hibernated cluster (DATABASE_
-	// ARCHITECTURE §7); a running pooler in front of a hibernated cluster would
-	// just refuse connects and burn a pod.
-	instances := int64(1)
-	if suspendedCompute(w.Branch.State) {
-		instances = 0
-	}
+	instances := poolerInstances(w)
 	return &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": PoolerGVK.GroupVersion().String(),
 		"kind":       PoolerGVK.Kind,
@@ -334,13 +359,9 @@ func BuildPooler(w postgres.BranchWork) *unstructured.Unstructured {
 
 // BuildROPooler renders the branch's READ pooler: a transaction-mode PgBouncer
 // of type `ro` that fans reads out to the cluster's hot-standby replicas (the
-// ro_pooled endpoint; read replicas). Scaled to zero alongside a hibernated
-// cluster, like the rw pooler.
+// ro_pooled endpoint; read replicas). Same replica policy as the rw pooler.
 func BuildROPooler(w postgres.BranchWork) *unstructured.Unstructured {
-	instances := int64(1)
-	if suspendedCompute(w.Branch.State) {
-		instances = 0
-	}
+	instances := poolerInstances(w)
 	return &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": PoolerGVK.GroupVersion().String(),
 		"kind":       PoolerGVK.Kind,

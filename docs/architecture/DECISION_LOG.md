@@ -241,6 +241,33 @@ admin console keeps it in an httpOnly cookie like the tenant key). The admin API
 read-mostly; destructive operations (deleting tenant resources, plan overrides) are deliberately
 excluded from v1. When operator RBAC lands, the token dies and the routes stay.
 
+## ADR-019 · HA-tier guarantees are builder-enforced: synchronous replication (`preferred` durability), controlled switchover, and pooler HA — `accepted`
+**Context:** A resilience audit found docs-vs-code gaps: SECURITY/SYSTEM docs promise
+"synchronous replication on HA tier" (the R-2 data-loss mitigation) and "failover < 30 s /
+controlled switchover", but `BuildCluster` set only `instances` (CNPG defaults → async
+replication, default update strategy), and both PgBouncer poolers were hardcoded to one replica —
+a pooler pod restart dropped every pooled connection even on production.
+**Decision:** the HA tier (branch role `production`, or any branch serving a read endpoint — the
+same conditions that already force `instances ≥ 2`) is **enforced in the builders**, not the
+docs: (a) `postgresql.synchronous: {method: any, number: 1, dataDurability: preferred}` — RPO≈0
+while a standby is healthy; `preferred` degrades to async instead of **blocking writes** when the
+sole standby of a 2-instance cluster is down. Availability-first is the deliberate call for the
+2-instance tier; a strict `required` mode belongs to a future 3-instance premium tier where
+quorum keeps writes flowing during single-standby loss. (b) `primaryUpdateStrategy: unsupervised`
++ `primaryUpdateMethod: switchover` — upgrades roll replica-first with a controlled switchover
+(DEPLOYMENT §6's promise, now rendered). (c) **Pooler HA:** rw and ro poolers run 2 replicas on
+the HA tier (1 on dev/preview, 0 suspended) so one pooler pod restart no longer severs every
+pooled connection. Branched clusters inherit all of this — `BuildBranchedCluster` derives from
+`BuildCluster`.
+**Alternatives:** strict `required` sync on 2 instances (rejected — turns any standby failure
+into a write outage, availability regression worse than the async window it closes); leaving
+poolers at 1 replica (rejected — cheap fix, real blast radius); tuning `failoverDelay` etc.
+(deferred — CNPG defaults are sane; revisit with real failover-drill data, Phase 5 gate).
+**Consequences:** HA-tier branches carry a second pooler pod (small, bounded cost). With
+`preferred` durability there remains a brief async window while a standby is being replaced —
+documented honestly in DATABASE_ARCHITECTURE; the WAL archive keeps RPO bounded regardless.
+Docs (SYSTEM §5, DATABASE §"HA", R-2) now cite this ADR instead of promising unbuilt behavior.
+
 ---
 
 ## Open questions — **all answered by owner, 2026-07-17**

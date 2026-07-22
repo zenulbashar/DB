@@ -2,6 +2,32 @@
 
 All notable changes to this repository. Format loosely follows [Keep a Changelog](https://keepachangelog.com/); one entry per phase gate plus notable intermediate merges.
 
+## [Resilience — HA hardening (ADR-019)] — 2026-07-20
+
+A resilience audit found docs-vs-code gaps: the docs promised HA behavior the builders didn't
+render. The HA tier's guarantees are now **builder-enforced**.
+
+### Decided (ADR-019)
+- HA tier = branch role `production` OR any branch serving a read endpoint (the existing
+  2-instance conditions). On that tier `BuildCluster` now renders **synchronous replication**
+  (`method: any, number: 1, dataDurability: preferred` — RPO≈0 while the standby is healthy;
+  degrades to async instead of blocking writes when the sole standby is down) and
+  **controlled switchover** on updates (`primaryUpdateStrategy: unsupervised`,
+  `primaryUpdateMethod: switchover`). A strict `required`/3-instance tier is documented as the
+  future premium step. Branched clusters (data forks) inherit via `BuildBranchedCluster`.
+- **Pooler HA** — rw and ro PgBouncer poolers run **2 replicas on the HA tier** (1 on
+  dev/preview, 0 suspended), so a single pooler pod restart no longer severs every pooled
+  connection on a production branch.
+
+### Tests
+- HA cluster renders the synchronous block + switchover strategy; dev cluster renders neither
+  and stays 1 instance; a read-endpoint branch is HA tier; branched clusters inherit; pooler
+  replicas 2/1/0 by tier/suspension (both poolers). Full reconciler suite green.
+
+### Docs
+- SYSTEM_ARCHITECTURE §5 and DATABASE_ARCHITECTURE §1.1 now describe the enforced behavior and
+  cite ADR-019; RISK_REGISTER R-2 mitigation marked builder-enforced.
+
 ## [Admin console — operator UI] — 2026-07-20
 
 The operator UI over the admin API (ADR-018): see the whole platform, see which tenant uses what,

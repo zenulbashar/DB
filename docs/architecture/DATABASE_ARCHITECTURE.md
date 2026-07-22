@@ -32,8 +32,8 @@ their migration histories). Version upgrades via CNPG major-upgrade flow, offere
 | Plan tier | Instances | Storage | Failover |
 |---|---|---|---|
 | Dev/preview branch | 1 | PVC (snapshot-backed if CoW available) | restart + WAL archive (RPO≈0, RTO minutes) |
-| Production (starter) | 2 | PVC + streaming replica | automated, ~10–30 s |
-| Production (HA) | 3 | quorum sync replication | automated, RPO 0 |
+| HA tier — production role, or any branch with a read endpoint (**builder-enforced**, ADR-019) | 2 | PVC + streaming replica, synchronous replication (`method: any, number: 1, dataDurability: preferred`) + replica-first controlled switchover; poolers run 2 replicas | automated, ~10–30 s; RPO ≈ 0 while a standby is healthy (degrades to async — never blocks writes — when it isn't) |
+| Production (strict, future premium) | 3 | quorum sync replication (`required`) | automated, RPO 0 |
 
 Compute sizes are t-shirt CUs (0.25–8 vCPU-equivalent) mapped to k8s requests/limits.
 Autoscaling: vertical within bounds (Phase 4) driven by CNPG rolling restarts during low-traffic
