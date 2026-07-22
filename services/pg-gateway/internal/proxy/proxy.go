@@ -56,6 +56,9 @@ type Metrics struct {
 	Wakes       *prometheus.CounterVec // by result: ready|timeout|error
 	WakeWaitSec prometheus.Histogram   // hold duration until ready
 	HoldsActive prometheus.Gauge       // connections currently held waiting to wake
+	// DialRetries counts backend dial attempts that failed and were retried
+	// (ADR-007 addendum: bounded retry over a failover blip, not LB).
+	DialRetries prometheus.Counter
 }
 
 func NewMetrics(reg prometheus.Registerer) *Metrics {
@@ -83,9 +86,13 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		HoldsActive: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "pggw_wake_holds_active", Help: "Connections currently held waiting for a wake.",
 		}),
+		DialRetries: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "pggw_backend_dial_retries_total",
+			Help: "Backend dial failures that were retried (bounded retry over failover blips).",
+		}),
 	}
 	reg.MustRegister(m.ActiveConns, m.ConnsTotal, m.Bytes, m.ConnectErrors,
-		m.Wakes, m.WakeWaitSec, m.HoldsActive)
+		m.Wakes, m.WakeWaitSec, m.HoldsActive, m.DialRetries)
 	return m
 }
 
@@ -214,7 +221,7 @@ func (s *Server) handle(ctx context.Context, raw net.Conn) {
 	}
 	defer s.release(endpointID, route.BranchID)
 
-	backend, err := net.DialTimeout("tcp", route.Backend, s.cfg.DialTimeout)
+	backend, err := s.dialBackend(ctx, route.Backend)
 	if err != nil {
 		s.fail(client, "backend-dial", "08006", "endpoint backend unavailable")
 		return
@@ -234,6 +241,35 @@ func (s *Server) handle(ctx context.Context, raw net.Conn) {
 	defer s.m.ActiveConns.WithLabelValues(endpointID).Dec()
 
 	s.pipe(client, backend, endpointID)
+}
+
+// dialBackendBackoff is the between-attempt wait schedule: 3 attempts total,
+// well under typical client connect timeouts even stacked on DialTimeout.
+var dialBackendBackoff = []time.Duration{250 * time.Millisecond, 500 * time.Millisecond}
+
+// dialBackend dials the route's single backend with a small bounded retry. A
+// CNPG failover or pod reschedule swaps the k8s Service's endpoints within
+// seconds; erroring the client over a blip it would survive is worse than a
+// sub-second wait. This is NOT load balancing or failover — same one backend,
+// retried (ADR-007's "route, hold, count" scope is unchanged).
+func (s *Server) dialBackend(ctx context.Context, addr string) (net.Conn, error) {
+	var lastErr error
+	for attempt := 0; ; attempt++ {
+		conn, err := net.DialTimeout("tcp", addr, s.cfg.DialTimeout)
+		if err == nil {
+			return conn, nil
+		}
+		lastErr = err
+		if attempt >= len(dialBackendBackoff) {
+			return nil, lastErr
+		}
+		s.m.DialRetries.Inc()
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(dialBackendBackoff[attempt]):
+		}
+	}
 }
 
 // holdAndWake handles a connection to a suspended endpoint (ADR-014): trigger a

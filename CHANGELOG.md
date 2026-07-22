@@ -2,6 +2,21 @@
 
 All notable changes to this repository. Format loosely follows [Keep a Changelog](https://keepachangelog.com/); one entry per phase gate plus notable intermediate merges.
 
+## [Resilience — gateway bounded dial retry] — 2026-07-20
+
+### Added
+- **`pg-gateway` retries a failed backend dial** up to twice (250 ms / 500 ms backoff; the whole
+  budget stays well under client connect timeouts) before answering `08006`, and aborts promptly
+  if the client hangs up mid-backoff. A CNPG failover or pod reschedule swaps a Service's
+  endpoints within seconds — clients now ride over the blip instead of erroring. Explicitly **not**
+  load balancing (ADR-007 addendum): the same single backend is retried; multi-backend selection
+  stays Gen-2. New metric `pggw_backend_dial_retries_total`.
+
+### Tests
+- Unit (real TCP): a backend that comes up between attempts is reached (retry metric ≥ 1); a dead
+  backend still fails within the bounded budget after exactly 3 attempts; a client cancel aborts
+  the backoff promptly. Full gateway suite + the pgx TLS/SNI e2e integration suite green.
+
 ## [Resilience — HA hardening (ADR-019)] — 2026-07-20
 
 A resilience audit found docs-vs-code gaps: the docs promised HA behavior the builders didn't
