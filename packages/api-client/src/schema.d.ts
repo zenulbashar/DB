@@ -927,6 +927,8 @@ export interface components {
             active_api_keys: number;
             /** @description Sum of effective CU over branches currently holding compute. */
             allocated_cu: number;
+            /** @description Branches whose latest restore verification failed (R-2 — page the operator). */
+            restore_verify_failures: number;
         };
         /** @description One tenant's resource inventory and activity recency. */
         OrgUsage: {

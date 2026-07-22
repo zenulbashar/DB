@@ -20,6 +20,9 @@ type AdminOverview struct {
 	// platform's current compute footprint (v1 "usage"; metered usage is the
 	// Phase 7 pipeline).
 	AllocatedCU float64 `json:"allocated_cu"`
+	// RestoreVerifyFailures counts branches whose latest restore verification
+	// FAILED — an unrestorable archive is a page, not a dashboard row (R-2).
+	RestoreVerifyFailures int `json:"restore_verify_failures"`
 }
 
 // OrgUsage is one tenant's resource inventory and activity recency.

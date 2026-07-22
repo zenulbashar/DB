@@ -1494,8 +1494,11 @@ components:
         allocated_cu:
           type: number
           description: Sum of effective CU over branches currently holding compute.
+        restore_verify_failures:
+          type: integer
+          description: Branches whose latest restore verification failed (R-2 — page the operator).
       required: [orgs, users, projects, branches, branches_by_state, endpoints,
-                 imports_by_state, active_api_keys, allocated_cu]
+                 imports_by_state, active_api_keys, allocated_cu, restore_verify_failures]
 
     OrgUsage:
       type: object

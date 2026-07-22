@@ -40,9 +40,10 @@ func (s *Store) AdminOverview(ctx context.Context) (*domain.AdminOverview, error
 			       (SELECT count(*) FROM api_keys
 			         WHERE revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now())),
 			       (SELECT COALESCE(sum(`+effectiveCU+`), 0) FROM branches b
-			         WHERE b.state IN `+runningStates+`)`).
+			         WHERE b.state IN `+runningStates+`),
+			       (SELECT count(*) FROM restore_verifications WHERE status = 'fail')`).
 			Scan(&o.Orgs, &o.Users, &o.Projects, &o.Branches, &o.Endpoints,
-				&o.ActiveAPIKeys, &o.AllocatedCU); err != nil {
+				&o.ActiveAPIKeys, &o.AllocatedCU, &o.RestoreVerifyFailures); err != nil {
 			return err
 		}
 		if err := countByState(ctx, tx,
