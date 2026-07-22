@@ -196,8 +196,11 @@ Full alternatives analysis in [DECISION_LOG.md](DECISION_LOG.md); summary:
 ## 5. Availability model
 
 - **Tenant databases:** per-plan. Free/dev: 1 instance (restart-based recovery, RPO ≈ 0 via WAL
-  archive, RTO minutes). Pro/prod: 2–3 instances, synchronous or quorum-based replication per
-  CNPG config, automated failover < 30 s, RPO 0 in-region.
+  archive, RTO minutes). HA tier (production role, or any branch serving a read endpoint):
+  2 instances with **builder-enforced synchronous replication** (`preferred` durability — RPO ≈ 0
+  while the standby is healthy, degrades to async rather than blocking writes when it isn't) and
+  replica-first controlled switchover on updates; automated failover < 30 s (ADR-019). A strict
+  quorum (`required`) 3-instance tier is the future premium step.
 - **Gateway:** ≥ 3 replicas per region behind one L4 LB; stateless (route table is watched
   config); connection draining on deploy.
 - **Control plane:** API and reconcilers ≥ 2 replicas; control-plane PG is a 3-node CNPG
