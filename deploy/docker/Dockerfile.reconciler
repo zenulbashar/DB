@@ -1,0 +1,18 @@
+# Data-plane reconciler (services/control-plane/cmd/reconciler).
+# Runs in-cluster with a ServiceAccount; needs no shell or client tools.
+ARG GO_IMAGE=golang:1.24
+ARG RUNTIME_IMAGE=gcr.io/distroless/static-debian12:nonroot
+FROM ${GO_IMAGE} AS build
+WORKDIR /src
+COPY services/import-engine/go.mod services/import-engine/go.sum services/import-engine/
+COPY services/control-plane/go.mod services/control-plane/go.sum services/control-plane/
+RUN cd services/control-plane && go mod download
+COPY services/import-engine/ services/import-engine/
+COPY services/control-plane/ services/control-plane/
+RUN cd services/control-plane && \
+    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/reconciler ./cmd/reconciler
+
+FROM ${RUNTIME_IMAGE}
+COPY --from=build /out/reconciler /reconciler
+EXPOSE 8081
+ENTRYPOINT ["/reconciler"]

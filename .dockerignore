@@ -1,0 +1,11 @@
+# Build-context hygiene for deploy/docker/* (context = repo root).
+.git
+.github
+docs
+deploy/terraform
+deploy/argocd
+**/node_modules
+console/.next
+**/*.log
+tools
+api
