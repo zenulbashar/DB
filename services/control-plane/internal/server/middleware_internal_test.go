@@ -32,13 +32,13 @@ func serverWithKeyring(t *testing.T) *Server {
 // finding): create responses carry one-time API tokens and DB passwords.
 func TestIdempotencyBodyEncryptedAtRest(t *testing.T) {
 	s := serverWithKeyring(t)
-	secret := []byte(`{"token":"ndb_deadbeefcafe","owner_role":{"password":"hunter2"}}`)
+	secret := []byte(`{"token":"zdb_deadbeefcafe","owner_role":{"password":"hunter2"}}`)
 
 	stored := s.encodeIdem(secret)
 	if len(stored) == 0 || stored[0] != 0x01 {
 		t.Fatalf("expected encrypted (0x01) marker, got %v", stored[:1])
 	}
-	if bytes.Contains(stored, []byte("ndb_deadbeefcafe")) || bytes.Contains(stored, []byte("hunter2")) {
+	if bytes.Contains(stored, []byte("zdb_deadbeefcafe")) || bytes.Contains(stored, []byte("hunter2")) {
 		t.Fatal("plaintext credential leaked into the cached idempotency body")
 	}
 	if got := s.decodeIdem(stored); !bytes.Equal(got, secret) {

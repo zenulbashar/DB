@@ -1,6 +1,6 @@
 /*
  * Thin typed client over the generated OpenAPI schema. The console and the
- * Nimbus integration consume this; no other HTTP client for the NimbusDB API
+ * Nimbus integration consume this; no other HTTP client for the Zale DB API
  * should exist in the monorepo (ADR-012).
  */
 import type { paths } from "./schema";
@@ -8,7 +8,7 @@ import type { paths } from "./schema";
 export type { paths, components } from "./schema";
 
 export interface ClientOptions {
-  baseUrl: string; // e.g. https://api.db.nimbus.app/v1
+  baseUrl: string; // e.g. https://api.db.zaleit.com.au/v1
   /** ndb_ API key; omit for the unauthenticated endpoints (health, bootstrap). */
   apiKey?: string;
   fetchImpl?: typeof fetch;

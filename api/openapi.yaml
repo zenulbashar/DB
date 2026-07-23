@@ -1,15 +1,15 @@
 openapi: 3.1.0
 info:
-  title: NimbusDB API
+  title: Zale DB API
   version: 1.0.0-phase1
   description: |
-    Control-plane REST API for the NimbusDB serverless PostgreSQL platform.
+    Control-plane REST API for the Zale DB serverless PostgreSQL platform.
     Spec-first contract (ADR-012): handlers and clients are generated/validated from this file.
     Phase 1 surface: bootstrap, orgs, members, API keys, project records, audit log.
     Data-plane resources (branches, endpoints, backups, imports) arrive in Phase 2+ per
     docs/architecture/API_SPECIFICATION.md.
 servers:
-  - url: https://api.db.nimbus.app/v1
+  - url: https://api.db.zaleit.com.au/v1
   - url: http://localhost:8080/v1
     description: Local development
 
@@ -1194,13 +1194,13 @@ components:
     apiKey:
       type: http
       scheme: bearer
-      bearerFormat: "ndb_<64 hex chars>"
+      bearerFormat: "zdb_<64 hex chars>"
     adminToken:
       type: http
       scheme: bearer
       description: >
         Platform-operator token (`NDB_ADMIN_TOKEN`, ADR-018). Grants the
-        /admin surface only; it is not an `ndb_` tenant key and tenant keys
+        /admin surface only; it is not a `zdb_` tenant key and tenant keys
         never open /admin.
 
   parameters:

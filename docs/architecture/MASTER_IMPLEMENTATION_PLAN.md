@@ -1,4 +1,4 @@
-# Master Implementation Plan — NimbusDB
+# Master Implementation Plan — Zale DB
 
 **Status:** **Approved v1.0** (owner sign-off 2026-07-17; see DECISION_LOG for answered questions)
 **Owner:** CTO / Principal Architecture Group
@@ -19,7 +19,7 @@ Supabase, and Railway's managed Postgres — that:
 3. Once stable, onboards external tenants migrating from Neon, Supabase, Railway, AWS RDS,
    Azure Database for PostgreSQL, and self-hosted PostgreSQL.
 
-**Working product name:** `NimbusDB` — provisional, chosen to sit inside the existing Nimbus
+**Working product name:** `Zale DB` — provisional, chosen to sit inside the existing Nimbus
 brand family (`nimbus.app`, token prefix `nbt_`). Company domain observed: `zaleit.com.au`.
 Renaming is a find-and-replace-level decision recorded in [DECISION_LOG.md](DECISION_LOG.md) (ADR-001);
 nothing in the architecture depends on the name.
@@ -34,14 +34,14 @@ nothing in the architecture depends on the name.
 | Hosting platform "Nimbus" | `zenulbashar/hosting` | Next.js 15 + React 19 + Tailwind v4 + SQLite control plane. Data plane is **simulated** behind a `DeploymentDriver` interface (`src/lib/deploy-engine.ts`). Workload kinds: `site`, `agent`. REST API with session cookies + `nbt_` bearer tokens, deploy hooks, teams/projects tenancy, env-var injection per project, region model (`syd1`), mocked billing (hobby/pro). Its own docs name Postgres, k8s/Firecracker, and Caddy/Traefik as intended real infra. |
 | Roster | `zenulbashar/roster-tool` | Next.js 16, Drizzle + plain `pg` TCP pool. Neon Sydney (`ap-southeast-2`): **pooled** endpoint for the Vercel web app (`syd1`), **direct session-mode** endpoint for the Railway worker running `pg-boss` and for CI migrations (`PROD_DATABASE_URL`). ~40 tables, 32 additive migrations, **no extensions**, Auth.js **database sessions**, clock photos stored as `bytea`. |
 | Prompt2Eat | `zenulbashar/order-tool` | Next.js 16, Drizzle + `@neondatabase/serverless` **WebSocket driver** (needs driver swap), interactive transactions (needs session-capable pooling or direct), ~41 tables, 55+ additive migrations, ~28 `pgEnum`s, **no extensions**, app-generated UUIDs, files in Cloudflare R2 (not in DB), Vercel `syd1` + Vercel Cron + Stripe webhooks. |
-| Design export | `order-tool/design/design_handoff_prompt2eat/` | High-fidelity design-handoff bundle (tokens.css, tailwind.theme.js, component state catalogue). This is the **Prompt2Eat** design system, not a console design for NimbusDB. See [DESIGN_SYSTEM_MAPPING.md](DESIGN_SYSTEM_MAPPING.md) for how the console handles this. |
+| Design export | `order-tool/design/design_handoff_prompt2eat/` | High-fidelity design-handoff bundle (tokens.css, tailwind.theme.js, component state catalogue). This is the **Prompt2Eat** design system, not a console design for Zale DB. See [DESIGN_SYSTEM_MAPPING.md](DESIGN_SYSTEM_MAPPING.md) for how the console handles this. |
 
 **Two decisive discoveries:**
 
 1. **Nimbus is a working control plane with a simulated data plane.** Integration with Nimbus is
    therefore an API/contract integration (real today), while "deploy compute next to your DB"
    buttons will drive Nimbus's control plane, whose machine layer is being built separately.
-   NimbusDB must not depend on Nimbus's data plane existing. (Risk R-11.)
+   Zale DB must not depend on Nimbus's data plane existing. (Risk R-11.)
 2. **Both first customers are already portable.** Neither uses Postgres extensions or
    Neon-proprietary storage features. Roster needs zero code changes (env swap only);
    Prompt2Eat needs a one-file driver swap. Both require the **pooled + direct dual-endpoint
@@ -179,6 +179,6 @@ Per the implementation strategy, each phase must, before merging its final PR:
 ## 9. Approval
 
 **Approved 2026-07-17.** The owner reviewed this document set and answered all open questions
-(DECISION_LOG.md §"Open questions"): name **NimbusDB** (provisional), substrate **managed k8s**
+(DECISION_LOG.md §"Open questions"): name **Zale DB** (provisional), substrate **managed k8s**
 (ADR-005), console design export **forthcoming** (interim system per DESIGN_SYSTEM_MAPPING §5),
 billing **Stripe**, migration order **Roster → Prompt2Eat**. Phase 1 is authorized.

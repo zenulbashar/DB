@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: import-worker
-          image: ghcr.io/zenulbashar/nimbusdb-import-worker:latest
+          image: ghcr.io/zenulbashar/zaledb-import-worker:latest
           imagePullPolicy: Always
           envFrom:
             - secretRef: { name: ndb-import-worker-env }

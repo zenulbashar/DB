@@ -1,7 +1,7 @@
 // Package dumprestore executes the dump_restore migration mode
 // (MIGRATION_STRATEGY §2): pg_dump custom-format archive → pg_restore into
 // the target, under a caller-managed write freeze. Roles/ownership are
-// deliberately not carried — target roles are NimbusDB-managed.
+// deliberately not carried — target roles are Zale DB-managed.
 package dumprestore
 
 import (

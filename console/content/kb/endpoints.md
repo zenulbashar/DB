@@ -6,7 +6,7 @@ summary: Pooled vs direct vs read-only endpoints, and the session-state caveats 
 ---
 
 Every branch exposes up to three **endpoints** — stable hostnames like
-`ep-….syd1.db.nimbus.app` that survive suspends, resizes, and failovers.
+`ep-….syd1.db.zaleit.com.au` that survive suspends, resizes, and failovers.
 
 | Kind | Name in console | Use it for |
 |---|---|---|

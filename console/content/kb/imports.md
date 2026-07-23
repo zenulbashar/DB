@@ -5,7 +5,7 @@ order: 1
 summary: Move a database from Neon, Supabase, RDS, Azure, or any Postgres — dump/restore or near-zero-downtime live sync.
 ---
 
-The import engine moves an existing PostgreSQL database into a NimbusDB branch.
+The import engine moves an existing PostgreSQL database into a Zale DB branch.
 It supports two modes; pick by how much downtime you can afford.
 
 | Mode | Downtime | Use when |
@@ -61,7 +61,7 @@ When you're ready (low-traffic window, lag ≈ 0):
    counts/checksums, then completes: **verification runs before** the
    replication link is torn down, so a failed check leaves the source intact
    as your rollback.
-3. Point your application's `DATABASE_URL` at the NimbusDB endpoint.
+3. Point your application's `DATABASE_URL` at the Zale DB endpoint.
 
 Keep the source alive until you're satisfied — that's your instant rollback.
 

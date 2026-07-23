@@ -72,7 +72,7 @@ type Report struct {
 	Warnings            []Finding   `json:"warnings"`
 }
 
-// Extensions NimbusDB pre-approves on target branches
+// Extensions Zale DB pre-approves on target branches
 // (DATABASE_ARCHITECTURE §8 allowlist).
 var extensionAllowlist = map[string]bool{
 	"pgcrypto": true, "uuid-ossp": true, "postgis": true, "vector": true,
@@ -231,7 +231,7 @@ func derive(r *Report) {
 		sort.Strings(offList)
 		r.Warnings = append(r.Warnings, Finding{
 			Code:        "extensions-review",
-			Message:     "extensions outside the NimbusDB allowlist: " + strings.Join(offList, ", "),
+			Message:     "extensions outside the Zale DB allowlist: " + strings.Join(offList, ", "),
 			Remediation: "Request allowlisting before cutover, or confirm the application does not need them on the target.",
 		})
 	}

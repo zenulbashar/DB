@@ -21,7 +21,7 @@ spec:
       serviceAccountName: nimbusdb-reconciler
       containers:
         - name: reconciler
-          image: ghcr.io/zenulbashar/nimbusdb-reconciler:latest
+          image: ghcr.io/zenulbashar/zaledb-reconciler:latest
           imagePullPolicy: Always
           envFrom:
             - secretRef: { name: ndb-reconciler-env }

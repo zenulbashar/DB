@@ -1,4 +1,4 @@
-# Deployment Architecture — NimbusDB
+# Deployment Architecture — Zale DB
 
 **Status:** Draft v0.1
 
@@ -47,7 +47,7 @@ namespaces:
   prj-<ulid>  — one per tenant project (MULTI_TENANCY)
 ```
 
-DNS: `*.syd1.db.nimbus.app → gateway LB`; `api.db.nimbus.app`, `console.db.nimbus.app → Traefik`.
+DNS: `*.syd1.db.zaleit.com.au → gateway LB`; `api.db.zaleit.com.au`, `console.db.zaleit.com.au → Traefik`.
 
 ## 4. GitOps pipeline
 

@@ -1,4 +1,4 @@
-# API Specification — NimbusDB REST API v1
+# API Specification — Zale DB REST API v1
 
 **Status:** Draft v0.1 · The normative contract will live at `/api/openapi.yaml` (OpenAPI 3.1, spec-first — MASTER plan §7). This document fixes the resource model, auth, conventions, and representative shapes.
 
@@ -6,7 +6,7 @@
 
 ## 1. Fundamentals
 
-- **Base URL:** `https://api.db.nimbus.app/v1` (region-agnostic; resources carry `region`).
+- **Base URL:** `https://api.db.zaleit.com.au/v1` (region-agnostic; resources carry `region`).
 - **Format:** JSON request/response; `Content-Type: application/json`.
 - **IDs:** ULIDs with typed prefixes: `org_…`, `prj_…`, `br_…`, `ep_…`, `key_…`, `imp_…`, `bak_…`.
 - **Pagination:** cursor-based — `?limit=` (≤100) & `?cursor=`; responses carry `next_cursor`.
@@ -14,7 +14,7 @@
 - **Errors (RFC 9457 problem+json):**
 
 ```json
-{ "type": "https://api.db.nimbus.app/errors/branch-not-ready",
+{ "type": "https://api.db.zaleit.com.au/errors/branch-not-ready",
   "title": "Branch is not ready", "status": 409,
   "detail": "Branch br_01J… is suspended and cannot be branched from until resumed.",
   "request_id": "req_01J…" }
@@ -29,8 +29,8 @@
 | Credential | Format | Use |
 |---|---|---|
 | Console session | httpOnly cookie | Console only (first-party). |
-| API key | `Authorization: Bearer ndb_<64hex>` | Programmatic; org-scoped; explicit scopes. Stored hashed (SHA-256); shown once at creation. |
-| Service integration key | same format, restricted scope set | Nimbus ↔ NimbusDB integration. |
+| API key | `Authorization: Bearer zdb_<64hex>` | Programmatic; org-scoped; explicit scopes. Stored hashed (SHA-256); shown once at creation. |
+| Service integration key | same format, restricted scope set | Nimbus ↔ Zale DB integration. |
 
 Scopes (least privilege): `orgs:read|write`, `members:manage`, `projects:read|write|provision`,
 `branches:read|write`, `endpoints:read`, `roles:read|write`, `backups:read|write`, `restores:write`,
@@ -108,8 +108,8 @@ Admin-portal endpoints live under `/admin/v1/*` on a separate hostname, separate
   "storage_bytes": 734003200,
   "pitr_window": { "from": "2026-08-25T00:00:00Z", "to": "now" },
   "endpoints": [
-    { "id": "ep_01JZX8K5RW", "kind": "rw_pooled",  "host": "ep-01jzx8k5rw.syd1.db.nimbus.app", "state": "ready" },
-    { "id": "ep_01JZX8K5RD", "kind": "rw_direct",  "host": "ep-01jzx8k5rd.syd1.db.nimbus.app", "state": "ready" }
+    { "id": "ep_01JZX8K5RW", "kind": "rw_pooled",  "host": "ep-01jzx8k5rw.syd1.db.zaleit.com.au", "state": "ready" },
+    { "id": "ep_01JZX8K5RD", "kind": "rw_direct",  "host": "ep-01jzx8k5rd.syd1.db.zaleit.com.au", "state": "ready" }
   ]
 }
 ```
@@ -128,7 +128,7 @@ Admin-portal endpoints live under `/admin/v1/*` on a separate hostname, separate
 }
 ```
 
-**Webhook event envelope** (HMAC-SHA256 signature header `X-NimbusDB-Signature`):
+**Webhook event envelope** (HMAC-SHA256 signature header `X-Zale DB-Signature`):
 ```json
 { "id": "evt_01…", "type": "branch.ready", "org_id": "org_…", "at": "…",
   "data": { "branch_id": "br_…", "project_id": "prj_…" } }

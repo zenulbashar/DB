@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 /*
- * NimbusDB console token layer — DESIGN_SYSTEM_MAPPING.md §2.
+ * Zale DB console token layer — DESIGN_SYSTEM_MAPPING.md §2.
  * Interim palette derived from the Nimbus hosting platform design language
  * (dark-first, forest chrome, accent blue). Token-isolated by construction:
  * when the dedicated console design export lands (§5), values change HERE and

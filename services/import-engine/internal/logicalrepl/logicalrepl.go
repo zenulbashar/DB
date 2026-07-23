@@ -6,7 +6,7 @@
 // Requirements enforced by preflight: source wal_level=logical, free
 // replication slots, REPLICATION-capable role. Target-side CREATE
 // SUBSCRIPTION needs superuser (or pg_create_subscription on PG ≥ 16) —
-// on NimbusDB targets the import runs with a platform-issued import role.
+// on Zale DB targets the import runs with a platform-issued import role.
 package logicalrepl
 
 import (

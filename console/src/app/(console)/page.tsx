@@ -39,7 +39,7 @@ export default async function Home() {
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Projects</h1>
           <p className="mt-1 text-sm text-fg-muted">
-            Serverless PostgreSQL on the Nimbus platform.
+            Serverless PostgreSQL by Zale IT.
           </p>
         </div>
         <div className="flex items-center gap-3">

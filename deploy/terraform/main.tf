@@ -33,4 +33,4 @@ variable "cell" {
 # module "cluster"        { ... }  # Phase 2: managed k8s + node pools (system/controlplane/gateway/tenant)
 # module "object_storage" { ... }  # Phase 2: WAL archive + backup buckets, second-region replica bucket
 # module "kms"            { ... }  # Phase 2: envelope-encryption root key
-# module "dns"            { ... }  # Phase 2: *.syd1.db.nimbus.app, api/console records
+# module "dns"            { ... }  # Phase 2: *.syd1.db.zaleit.com.au, api/console records

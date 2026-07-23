@@ -1,4 +1,4 @@
-# Decision Log — NimbusDB
+# Decision Log — Zale DB
 
 ADR format: context → decision → alternatives → consequences. Status: `proposed` (awaiting owner sign-off), `accepted`, `superseded`.
 New ADRs are appended; superseding requires a link both ways.
@@ -12,7 +12,7 @@ New ADRs are appended; superseding requires a link both ways.
 **Context:** The hosting platform brands as **Nimbus** (`nimbus.app`, `nbt_` tokens); company domain `zaleit.com.au`; the mission names no product name.
 **Decision:** Use **NimbusDB** as the working name and `*.db.nimbus.app` as the endpoint namespace, keeping the platform family coherent.
 **Alternatives:** standalone brand (marketing freedom, but fractures the "one platform" story); Zaleit-branded (company brand vs product brand unresolved).
-**Consequences:** rename is cheap by policy — no identifier in code embeds the name except DNS + token prefix (`ndb_`), both centralized. **Owner (2026-07-17): "use it for now" — accepted as provisional; revisit before external GA (Phase 7).**
+**Consequences:** rename is cheap by policy — no identifier in code embeds the name except DNS + token prefix (`ndb_`), both centralized. **Owner (2026-07-17): "use it for now" — accepted as provisional.** Superseded on the name by **ADR-021 (Zale DB, `db.zaleit.com.au`)**.
 
 ## ADR-002 · Go for control plane, gateway, and import engine — `accepted`
 **Context:** Need a language for API + Kubernetes reconcilers + a wire-level TCP proxy. Ecosystem reality: controller-runtime/client-go, CNPG, ArgoCD, NATS, Temporal SDKs are Go-first. Existing estate is TypeScript (Nimbus, both apps) but has no k8s controller story.
@@ -301,6 +301,26 @@ now (rejected — lock-in + cost burns the credit in weeks); k8s-less rewrite of
 are the durability net (R-2), and the profile documents that honestly (RISK_REGISTER). The cloud
 profile (ADR-005) is unchanged and remains the GA target; the self-host manifests double as its
 starting point.
+
+## ADR-021 · Product renamed **Zale DB**; platform domain `db.zaleit.com.au`; API-key prefix `zdb_` — `accepted`
+**Context:** the owner named the product **Zale DB**, hosted at `db.zaleit.com.au`
+(`api.` / `console.` / `hosting.` prefixes; tenant endpoints `ep-….syd1.db.zaleit.com.au`).
+Nothing is deployed and zero API keys have been issued, so the only forever-user-visible
+identifier — the key prefix — could still change for free.
+**Decision:** all **user-visible** naming moves to the new brand: console UI + titles, KB
+articles, README/architecture-doc titles, OpenAPI title + prod server URL, runbooks (now with
+concrete hosts), the `NDB_DOMAIN` default, and the API-key prefix **`zdb_`** (minted before any
+key existed). GHCR images become `ghcr.io/zenulbashar/zaledb-*`. **Internal identifiers are
+deliberately retained** — `NDB_*` env vars, `ndb-*` k8s resource names, `nimbusdb-{platform,
+gateway,monitoring}` namespaces, `nimbusdb.io/*` labels, cookies `ndb_token`/`ndb_admin`,
+npm `@nimbusdb/api-client`, DB names `nimbusdb_cp`/`ndb_app`, import-engine `ndb_*` SQL prefixes —
+stable internal IDs are not brand, and renaming them buys churn, not value. **"Nimbus" stays
+wherever it names the separate hosting platform** (ADR-008 boundary, §7 integration, `nbt_`
+tokens, `nimbus-hosting` deployment). Historical text in the CHANGELOG and earlier ADRs keeps the
+old names — records describe the past.
+**Consequences:** any `ndb_`-prefixed key from local experiments stops validating (none matter);
+GHCR `nimbusdb-*` packages linger unused. ADR-001's product-naming decision is superseded by this
+ADR for the name itself; everything else in ADR-001 stands.
 
 ---
 

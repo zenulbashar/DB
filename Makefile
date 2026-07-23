@@ -1,4 +1,4 @@
-# NimbusDB monorepo entry points. Each target delegates into the owning package.
+# Zale DB monorepo entry points. Each target delegates into the owning package.
 
 .PHONY: dev dev-db migrate api test test-integration lint build console-dev console-build generate openapi-lint smoke
 

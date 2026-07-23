@@ -1,6 +1,6 @@
 # @nimbusdb/api-client
 
-TypeScript types for the NimbusDB control-plane API, **generated** from
+TypeScript types for the Zale DB control-plane API, **generated** from
 [`/api/openapi.yaml`](../../api/openapi.yaml).
 
 Spec-first rule (ADR-012): change the OpenAPI document first, then run

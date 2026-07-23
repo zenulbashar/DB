@@ -2,11 +2,11 @@
 title: API keys & scopes
 category: Access & security
 order: 1
-summary: Creating, scoping, rotating, and revoking ndb_ API keys.
+summary: Creating, scoping, rotating, and revoking zdb_ API keys.
 ---
 
 Every API call (and the console session) is authenticated by an **API key**:
-`ndb_` followed by 64 hex characters, sent as `Authorization: Bearer ndb_…`.
+`zdb_` followed by 64 hex characters, sent as `Authorization: Bearer zdb_…`.
 
 ## Creating a key
 

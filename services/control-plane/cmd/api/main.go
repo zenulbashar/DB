@@ -1,4 +1,4 @@
-// Command api runs the NimbusDB control-plane REST API.
+// Command api runs the Zale DB control-plane REST API.
 package main
 
 import (

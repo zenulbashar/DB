@@ -1,4 +1,4 @@
-# System Architecture — NimbusDB
+# System Architecture — Zale DB
 
 **Status:** Draft v0.1 · **Companion docs:** [DATABASE_ARCHITECTURE.md](DATABASE_ARCHITECTURE.md), [MULTI_TENANCY.md](MULTI_TENANCY.md), [DEPLOYMENT_ARCHITECTURE.md](DEPLOYMENT_ARCHITECTURE.md)
 
@@ -90,7 +90,7 @@ flowchart TB
 | **Kubernetes** | k8s ≥1.31 | Substrate for all tenant workloads and platform services. |
 | **CloudNativePG (CNPG)** | v1.25+ operator | Tenant Postgres lifecycle: HA (streaming replication + automated failover), rolling updates, backups via Barman Cloud plugin, volume snapshots, hibernation. |
 | **PgBouncer** | via CNPG `Pooler` CR | Per-branch pooled endpoint, transaction mode. Session-mode semantics are served by the direct endpoint (see DATABASE_ARCHITECTURE §5). |
-| **pg-gateway** | Go (custom; ~the one custom data-path component) | Terminates Postgres TLS, routes by SNI (`<endpoint-id>.<region>.db.nimbus.app`) to the right pooler/cluster service, holds connections while waking suspended computes, enforces per-endpoint connection limits, emits per-connection usage events. |
+| **pg-gateway** | Go (custom; ~the one custom data-path component) | Terminates Postgres TLS, routes by SNI (`<endpoint-id>.<region>.db.zaleit.com.au`) to the right pooler/cluster service, holds connections while waking suspended computes, enforces per-endpoint connection limits, emits per-connection usage events. |
 | **Cilium** | CNI + NetworkPolicy | Default-deny east-west; only gateway → pooler/cluster paths allowed into tenant namespaces. |
 | **Traefik** | Ingress | HTTP(S) ingress for API + console only. Postgres TCP traffic goes through pg-gateway, not Traefik (ADR-007). |
 | **Object storage** | S3-compatible (cloud S3 or MinIO) | WAL archive, base backups, branch snapshots export, import staging. Bucket-per-region, prefix-per-project. |
@@ -116,7 +116,7 @@ Target: **< 60 s** from API call to accepting connections (Gen 1).
 ### 3.2 Connection path (steady state)
 
 ```
-app → TLS+SNI: ep-abc123.syd1.db.nimbus.app:5432 → pg-gateway
+app → TLS+SNI: ep-abc123.syd1.db.zaleit.com.au:5432 → pg-gateway
     → (pooled endpoint) namespace prj-x / pgbouncer → postgres primary
     → (direct endpoint) namespace prj-x / cluster-rw service → postgres primary
     → (read endpoint)   namespace prj-x / cluster-ro service → replicas
@@ -228,20 +228,20 @@ Full alternatives analysis in [DECISION_LOG.md](DECISION_LOG.md); summary:
 Defined here; consumed in Phase 6. Nimbus-side work follows Nimbus's existing extension idioms
 (driver interface, env-var injection, activity log, plan quotas).
 
-1. **Provisioning direction (Nimbus → NimbusDB):** Nimbus gains a `DatabaseProvider` client that
+1. **Provisioning direction (Nimbus → Zale DB):** Nimbus gains a `DatabaseProvider` client that
    calls `POST /v1/projects` (service-to-service API key, org-scoped). A Nimbus project stores
    only `{ nimbusdb_project_id, endpoint_urls }`.
 2. **Env-var injection:** on provision/rotation, Nimbus writes `DATABASE_URL` (pooled) and
    `DATABASE_URL_DIRECT` into its `env_vars` for the linked project — same contract both
    customer apps already consume.
-3. **Deploy actions (NimbusDB → Nimbus):** console buttons "Deploy Compute / API / Worker /
+3. **Deploy actions (Zale DB → Nimbus):** console buttons "Deploy Compute / API / Worker /
    Cron / Frontend" call Nimbus's REST API (`nbt_` token, stored per-org as an integration
    secret) to create/deploy Nimbus projects of the appropriate kind. Today Nimbus models `site`
    and `agent`; worker/cron map to `agent` until Nimbus grows first-class kinds (tracked, R-11).
 4. **Attach / detach:** both directions store soft links only. Detach deletes the link records
    and (optionally) removes injected env vars; the database and the workload each keep running
    independently. No cascading deletes across systems, ever.
-5. **Webhooks:** NimbusDB emits `project.provisioned`, `endpoint.rotated`, `branch.created`,
+5. **Webhooks:** Zale DB emits `project.provisioned`, `endpoint.rotated`, `branch.created`,
    etc. to registered webhook URLs (Nimbus registers one); HMAC-signed, at-least-once via NATS.
 
 ---

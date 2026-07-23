@@ -2,6 +2,30 @@
 
 All notable changes to this repository. Format loosely follows [Keep a Changelog](https://keepachangelog.com/); one entry per phase gate plus notable intermediate merges.
 
+## [Rebrand — Zale DB on db.zaleit.com.au (ADR-021)] — 2026-07-20
+
+The product is now **Zale DB**, hosted at **db.zaleit.com.au**.
+
+### Changed (user-visible)
+- Brand: console logo/titles/copy, KB articles, README + architecture-doc titles, OpenAPI title —
+  `NimbusDB` → `Zale DB`. "Nimbus" stays wherever it names the separate hosting platform.
+- Domain default: `NDB_DOMAIN` → `db.zaleit.com.au`; endpoint hosts `ep-….syd1.db.zaleit.com.au`;
+  OpenAPI prod server `https://api.db.zaleit.com.au/v1`; runbooks now use the concrete hosts;
+  `gen-secrets.sh` ships the real domain as default.
+- **API-key prefix `ndb_` → `zdb_`** — minted before any key existed, so nothing breaks; console
+  connect validation, API hints, spec `bearerFormat`, and KB updated in lockstep.
+- GHCR images: `ghcr.io/zenulbashar/zaledb-*` (old `nimbusdb-*` packages linger unused).
+
+### Deliberately unchanged (ADR-021)
+- `NDB_*` env vars, `ndb-*` k8s resource names, `nimbusdb-*` namespaces, `nimbusdb.io/*` labels,
+  cookies, npm `@nimbusdb/api-client`, DB names (`nimbusdb_cp`, `ndb_app`), import-engine `ndb_*`
+  SQL prefixes — stable internal identifiers are not brand. CHANGELOG/ADR history keeps old names.
+
+### Verified
+- Full Go suites green with the domain/prefix assertions updated in lockstep; console typecheck +
+  build + boot check (brand mark, `zdb_` connect copy, KB renders); grep audit — no `NimbusDB` or
+  `db.nimbus.app` outside historical records; no corruption of `ndb_`-lookalike internals.
+
 ## [Deploy — self-host kit: k8s manifests, bootstrap, Azure & Binary Lane runbooks] — 2026-07-20
 
 The rest of the self-host profile (ADR-020): everything between a fresh VM and a serving platform.

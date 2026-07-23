@@ -1,4 +1,4 @@
-# ArgoCD app-of-apps for a NimbusDB cell (DEPLOYMENT_ARCHITECTURE §4).
+# ArgoCD app-of-apps for a Zale DB cell (DEPLOYMENT_ARCHITECTURE §4).
 # Bootstrap (once per cell, after terraform):
 #   kubectl apply -n argocd -f app-of-apps.yaml
 apiVersion: argoproj.io/v1alpha1

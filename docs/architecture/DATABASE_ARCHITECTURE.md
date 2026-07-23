@@ -1,4 +1,4 @@
-# Database Architecture — NimbusDB
+# Database Architecture — Zale DB
 
 **Status:** Draft v0.1 · **Scope:** tenant data plane (managed Postgres) + control-plane schema.
 
@@ -96,7 +96,7 @@ prepares.
 Connection-string format (Neon-compatible shape, eases migration tooling and mental model):
 
 ```
-postgresql://<role>:<password>@<endpoint-id>.<region>.db.nimbus.app/<database>?sslmode=require
+postgresql://<role>:<password>@<endpoint-id>.<region>.db.zaleit.com.au/<database>?sslmode=require
 ```
 
 TLS is required on all endpoints; SNI carries the endpoint ID for gateway routing. For clients

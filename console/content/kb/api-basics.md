@@ -2,11 +2,11 @@
 title: API basics — errors, idempotency, pagination
 category: Reference
 order: 1
-summary: The conventions every NimbusDB API call shares.
+summary: The conventions every Zale DB API call shares.
 ---
 
-Base URL: `https://api.db.nimbus.app/v1` (or your deployment's URL). All
-requests are JSON over TLS with `Authorization: Bearer ndb_…`.
+Base URL: `https://api.db.zaleit.com.au/v1` (or your deployment's URL). All
+requests are JSON over TLS with `Authorization: Bearer zdb_…`.
 
 ## Errors — RFC 9457 problems
 

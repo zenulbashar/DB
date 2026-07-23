@@ -14,7 +14,7 @@ export default async function AdminLayout({
       <header className="border-b border-edge-strong bg-surface-raised">
         <div className="mx-auto flex h-14 max-w-6xl items-center gap-3 px-6">
           <Link href="/admin" className="font-semibold tracking-tight">
-            Nimbus<span className="text-accent">DB</span>
+            Zale<span className="text-accent">DB</span>
           </Link>
           <span className="rounded-pill border border-warning/50 px-2 py-0.5 text-xs text-warning">
             operator

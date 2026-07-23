@@ -1,4 +1,4 @@
-# Roadmap — NimbusDB
+# Roadmap — Zale DB
 
 **Status:** Draft v0.1 · Phase ordering is authoritative in [MASTER_IMPLEMENTATION_PLAN.md](MASTER_IMPLEMENTATION_PLAN.md) §5; this document details scope and acceptance criteria. No calendar dates — phases gate on their exit checklists, not on the calendar; sequencing assumes a single senior engineer + AI-assisted implementation, so phases are sized to be individually shippable.
 
@@ -15,7 +15,7 @@
 - Monorepo scaffold per MASTER plan §4; Go workspace; Next.js console shell; CI (GitHub Actions: lint, typecheck, unit tests, build; path-filtered).
 - Local dev environment: `kind` cluster bootstrap script with CNPG + Cilium + Traefik installed; docker-compose fallback for pure-API work.
 - `api/openapi.yaml` v1 skeleton (orgs, projects, api-keys, auth) + generated TS client.
-- Control-plane API: health, authn (`ndb_` API keys + one-time bootstrap flow; console sessions arrive with the console in Phase 3 — ADR-013), org/user/member CRUD, API key issuance/revocation, project records CRUD, audit-log writes; control-plane Postgres with migrations; RLS + repository-layer scoping.
+- Control-plane API: health, authn (`zdb_` API keys + one-time bootstrap flow; console sessions arrive with the console in Phase 3 — ADR-013), org/user/member CRUD, API key issuance/revocation, project records CRUD, audit-log writes; control-plane Postgres with migrations; RLS + repository-layer scoping.
 - ArgoCD app-of-apps skeleton; Terraform module skeleton for the `syd1` substrate (ADR-005 decides the substrate at this point).
 
 **Acceptance**
@@ -78,18 +78,18 @@ API-key/audit management UIs, read-replica endpoint creation) are the remaining 
 - **Execute the two production migrations** (runbooks in MIGRATION_STRATEGY §6–7): Roster (env-swap only) and Prompt2Eat (driver-swap PR + env swap).
 
 **Acceptance**
-- Both apps in production on NimbusDB ≥ 14 days with error budgets intact; Neon projects decommissioned; rollback plans retired. This is the platform's proof gate.
+- Both apps in production on Zale DB ≥ 14 days with error budgets intact; Neon projects decommissioned; rollback plans retired. This is the platform's proof gate.
 
 ## Phase 6 — Nimbus integration
 
 **Scope**
-- Nimbus-side `DatabaseProvider` (their repo, their driver idiom) + NimbusDB service-key kind + webhooks.
+- Nimbus-side `DatabaseProvider` (their repo, their driver idiom) + Zale DB service-key kind + webhooks.
 - Env-var injection contract (`DATABASE_URL`, `DATABASE_URL_DIRECT`) incl. rotation propagation.
 - Console deploy actions: Deploy Compute / API / Worker / Cron / Frontend → Nimbus API (`site`/`agent` kinds today; worker/cron ride on `agent` until Nimbus adds first-class kinds).
 - Attach/detach workload flows both directions; shared usage surfacing into Nimbus's plan/usage UI.
 
 **Acceptance**
-- From NimbusDB console: provision DB → deploy a sample API on Nimbus with injected connection string → detach cleanly. From Nimbus: "Add database" → project provisioned in NimbusDB. Contract documented in both repos.
+- From Zale DB console: provision DB → deploy a sample API on Nimbus with injected connection string → detach cleanly. From Nimbus: "Add database" → project provisioned in Zale DB. Contract documented in both repos.
 
 ## Phase 7 — Commercial readiness
 

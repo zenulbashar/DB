@@ -12,7 +12,7 @@ export default async function ConsoleLayout({
       <header className="border-b border-edge bg-forest">
         <div className="mx-auto flex h-14 max-w-6xl items-center gap-3 px-6">
           <Link href="/" className="font-semibold tracking-tight">
-            Nimbus<span className="text-accent">DB</span>
+            Zale<span className="text-accent">DB</span>
           </Link>
           <span className="rounded-pill border border-forest-edge px-2 py-0.5 text-xs text-fg-muted">
             console

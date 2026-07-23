@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# NimbusDB self-host bootstrap (ADR-020). Idempotent; identical on the Azure
+# Zale DB self-host bootstrap (ADR-020). Idempotent; identical on the Azure
 # VM and the Binary Lane VPS — the provider only supplies the VM, firewall,
 # and DNS. Run as root from a clone of this repo:
 #

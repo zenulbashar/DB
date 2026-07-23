@@ -15,8 +15,8 @@ export async function connect(
   formData: FormData,
 ): Promise<ConnectState> {
   const token = String(formData.get("token") ?? "").trim();
-  if (!token.startsWith("ndb_")) {
-    return { error: "Enter a valid API key (starts with ndb_)." };
+  if (!token.startsWith("zdb_")) {
+    return { error: "Enter a valid API key (starts with zdb_)." };
   }
   try {
     await createClient({ baseUrl: API_BASE, apiKey: token }).listProjects({ limit: 1 });
