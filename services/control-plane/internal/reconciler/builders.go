@@ -243,9 +243,25 @@ func BuildNetworkPolicies(w postgres.BranchWork) []*unstructured.Unstructured {
 // matched by the ingress allow.
 func GatewayNamespaceLabel() string { return GatewayNamespace }
 
+// singleNode is the single-node capacity profile (ADR-022, NDB_SINGLE_NODE):
+// on a one-VM cluster a same-host Postgres replica shares the failure domain
+// and buys zero availability, and guaranteed-CPU tenant pods exhaust the
+// scheduler long before they exhaust the actual CPU. Set ONCE at boot via
+// SetSingleNode — never mutated after.
+var singleNode = false
+
+// SetSingleNode enables the single-node capacity profile (boot-time only).
+func SetSingleNode(on bool) { singleNode = on }
+
 // haTier reports whether the branch gets HA guarantees (ADR-019): production
 // role, or any branch serving a read endpoint (reads need a hot standby).
+// In the single-node profile (ADR-022) the production role alone does NOT
+// buy a second instance — but a read endpoint still does: the standby is
+// functionally required to serve reads, availability aside.
 func haTier(w postgres.BranchWork) bool {
+	if singleNode {
+		return hasReadEndpoint(w)
+	}
 	return w.Branch.Role == domain.BranchProduction || hasReadEndpoint(w)
 }
 
@@ -265,7 +281,18 @@ func BuildCluster(w postgres.BranchWork, backup *BackupConfig) *unstructured.Uns
 	cu := w.Branch.Compute.EffectiveCU()
 	cpuMilli := int(cu * 1000)
 	memMi := int(cu * 4096)
-	res := map[string]any{
+	cpuRequest := cpuMilli
+	if singleNode {
+		// Burstable CPU (ADR-022): reserve a quarter of the CU, burst to the
+		// full CU. CPU throttles gracefully under contention; memory does not,
+		// so memory stays guaranteed (request == limit) in both profiles.
+		cpuRequest = cpuMilli / 4
+	}
+	requests := map[string]any{
+		"cpu":    fmt.Sprintf("%dm", cpuRequest),
+		"memory": fmt.Sprintf("%dMi", memMi),
+	}
+	limits := map[string]any{
 		"cpu":    fmt.Sprintf("%dm", cpuMilli),
 		"memory": fmt.Sprintf("%dMi", memMi),
 	}
@@ -279,7 +306,7 @@ func BuildCluster(w postgres.BranchWork, backup *BackupConfig) *unstructured.Uns
 		"instances":             int64(instances),
 		"imageName":             fmt.Sprintf("ghcr.io/cloudnative-pg/postgresql:%d", w.PGVersion),
 		"storage":               map[string]any{"size": "5Gi"},
-		"resources":             map[string]any{"requests": res, "limits": res},
+		"resources":             map[string]any{"requests": requests, "limits": limits},
 		"postgresql":            postgresql,
 		"enableSuperuserAccess": false,
 	}
@@ -325,7 +352,8 @@ func poolerInstances(w postgres.BranchWork) int64 {
 	switch {
 	case suspendedCompute(w.Branch.State):
 		return 0
-	case haTier(w):
+	case haTier(w) && !singleNode:
+		// A second pooler pod on the same node is pure overhead (ADR-022).
 		return 2
 	default:
 		return 1

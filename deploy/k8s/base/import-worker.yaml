@@ -25,4 +25,4 @@ spec:
           readinessProbe:
             httpGet: { path: /healthz, port: 8082 }
           resources:
-            requests: { cpu: 100m, memory: 128Mi }
+            requests: { cpu: 25m, memory: 64Mi }
