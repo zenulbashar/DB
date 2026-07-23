@@ -17,6 +17,7 @@ import (
 	"github.com/zenulbashar/DB/services/import-engine/runner"
 
 	"github.com/zenulbashar/DB/services/control-plane/internal/config"
+	"github.com/zenulbashar/DB/services/control-plane/internal/domain"
 	"github.com/zenulbashar/DB/services/control-plane/internal/importworker"
 	"github.com/zenulbashar/DB/services/control-plane/internal/secrets"
 	"github.com/zenulbashar/DB/services/control-plane/internal/store/postgres"
@@ -30,6 +31,7 @@ func main() {
 		log.Error("config", "err", err)
 		os.Exit(1)
 	}
+	domain.SetBaseDomain(cfg.Domain)
 	keyring, err := secrets.ParseKeyring(cfg.KEKs, cfg.ActiveKEK)
 	if err != nil {
 		log.Error("keyring", "err", err)

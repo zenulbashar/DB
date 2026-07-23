@@ -123,14 +123,29 @@ type Project struct {
 	CreatedAt       time.Time    `json:"created_at"`
 }
 
+// baseDomain is the platform's DNS suffix for endpoint hosts and problem-type
+// URIs. Configurable for self-hosting (NDB_DOMAIN, ADR-020); set ONCE at boot
+// via SetBaseDomain before any request is served — never mutated after.
+var baseDomain = "db.nimbus.app"
+
+// SetBaseDomain overrides the platform DNS suffix (boot-time only).
+func SetBaseDomain(d string) {
+	if d != "" {
+		baseDomain = d
+	}
+}
+
+// BaseDomain returns the platform DNS suffix (e.g. "db.nimbus.app").
+func BaseDomain() string { return baseDomain }
+
 // EndpointHost derives the stable connect hostname for an endpoint ID
-// (DATABASE_ARCHITECTURE §5): ep_01abc… → ep-01abc….<region>.db.nimbus.app.
+// (DATABASE_ARCHITECTURE §5): ep_01abc… → ep-01abc….<region>.<base domain>.
 func EndpointHost(endpointID, region string) string {
 	host := endpointID
 	if len(host) > 3 && host[:3] == "ep_" {
 		host = "ep-" + host[3:]
 	}
-	return host + "." + region + ".db.nimbus.app"
+	return host + "." + region + "." + baseDomain
 }
 
 type ActorType string

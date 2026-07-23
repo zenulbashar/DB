@@ -135,9 +135,12 @@ func BuildResourceQuota(w postgres.BranchWork) *unstructured.Unstructured {
 const (
 	OperatorNamespace   = "cnpg-system"
 	MonitoringNamespace = "nimbusdb-monitoring"
-	pgPort              = int64(5432)
-	instanceMgrPort     = int64(8000) // CNPG instance-manager REST
-	exporterPort        = int64(9187) // postgres_exporter metrics
+	// PlatformNamespace hosts the control-plane workloads and the canonical
+	// backup-credentials secret the reconciler replicates to tenants.
+	PlatformNamespace = "nimbusdb-platform"
+	pgPort            = int64(5432)
+	instanceMgrPort   = int64(8000) // CNPG instance-manager REST
+	exporterPort      = int64(9187) // postgres_exporter metrics
 )
 
 func np(name, ns string, spec map[string]any) *unstructured.Unstructured {

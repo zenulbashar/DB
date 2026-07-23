@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/zenulbashar/DB/services/control-plane/internal/config"
+	"github.com/zenulbashar/DB/services/control-plane/internal/domain"
 	"github.com/zenulbashar/DB/services/control-plane/internal/secrets"
 	"github.com/zenulbashar/DB/services/control-plane/internal/server"
 	"github.com/zenulbashar/DB/services/control-plane/internal/store/postgres"
@@ -29,6 +30,7 @@ func main() {
 		log.Error("config", "err", err)
 		os.Exit(1)
 	}
+	domain.SetBaseDomain(cfg.Domain)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

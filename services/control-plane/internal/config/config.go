@@ -14,6 +14,7 @@ type Config struct {
 	AdminToken     string // NDB_ADMIN_TOKEN — platform-operator surface /v1/admin (ADR-018)
 	Env            string // dev|staging|prod
 	Version        string
+	Domain         string // NDB_DOMAIN — platform DNS suffix (ADR-020); default db.nimbus.app
 	KEKs           string // NDB_KEKS keyring spec, "1:<base64>,…" (SECURITY_MODEL §5)
 	ActiveKEK      string
 }
@@ -27,6 +28,7 @@ func Load() (Config, error) {
 		AdminToken:     os.Getenv("NDB_ADMIN_TOKEN"),
 		Env:            getenv("NDB_ENV", "dev"),
 		Version:        getenv("NDB_VERSION", "dev"),
+		Domain:         getenv("NDB_DOMAIN", "db.nimbus.app"),
 		KEKs:           os.Getenv("NDB_KEKS"),
 		ActiveKEK:      os.Getenv("NDB_ACTIVE_KEK"),
 	}

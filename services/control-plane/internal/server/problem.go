@@ -3,6 +3,8 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+
+	"github.com/zenulbashar/DB/services/control-plane/internal/domain"
 )
 
 // problem writes an RFC 9457 application/problem+json response
@@ -15,7 +17,9 @@ type problemBody struct {
 	RequestID string `json:"request_id,omitempty"`
 }
 
-const problemTypeBase = "https://api.db.nimbus.app/errors/"
+// problemTypeBase derives the RFC 9457 type-URI prefix from the configured
+// platform domain (NDB_DOMAIN, ADR-020).
+func problemTypeBase() string { return "https://api." + domain.BaseDomain() + "/errors/" }
 
 func writeProblem(w http.ResponseWriter, r *http.Request, status int, slug, title, detail string) {
 	body := problemBody{
@@ -25,7 +29,7 @@ func writeProblem(w http.ResponseWriter, r *http.Request, status int, slug, titl
 		RequestID: requestIDFrom(r.Context()),
 	}
 	if slug != "" {
-		body.Type = problemTypeBase + slug
+		body.Type = problemTypeBase() + slug
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(status)

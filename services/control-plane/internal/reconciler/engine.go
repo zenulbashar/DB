@@ -141,6 +141,16 @@ func (e *Engine) clusterFor(w postgres.BranchWork) *unstructured.Unstructured {
 func (e *Engine) provision(ctx context.Context, w postgres.BranchWork) error {
 	objs := []*unstructured.Unstructured{BuildNamespace(w), BuildResourceQuota(w)}
 	objs = append(objs, BuildNetworkPolicies(w)...)
+	if e.backup != nil && e.backup.CredentialsSourceNamespace != "" {
+		// The tenant cluster's barman section references the credentials
+		// secret by name in ITS namespace — replicate the canonical copy in
+		// before the Cluster needs it (ADR-020 closed this pending item).
+		creds, err := e.backupCredentialsCopy(ctx, w)
+		if err != nil {
+			return fmt.Errorf("replicate backup credentials: %w", err)
+		}
+		objs = append(objs, creds)
+	}
 	objs = append(objs, e.clusterFor(w), BuildPooler(w))
 	if hasReadEndpoint(w) {
 		objs = append(objs, BuildROPooler(w))
@@ -318,6 +328,35 @@ func (e *Engine) publishRoutes(ctx context.Context) error {
 		return err
 	}
 	return e.ensure(ctx, BuildRoutesConfigMap(routesJSON))
+}
+
+// backupCredentialsCopy reads the canonical archive-credentials secret from
+// the platform namespace and renders its copy for the tenant namespace. A
+// missing canonical secret is a hard error — provisioning a cluster that
+// cannot archive would silently violate R-2.
+func (e *Engine) backupCredentialsCopy(ctx context.Context, w postgres.BranchWork) (*unstructured.Unstructured, error) {
+	src := &unstructured.Unstructured{}
+	src.SetGroupVersionKind(schema.GroupVersionKind{Version: "v1", Kind: "Secret"})
+	key := client.ObjectKey{Namespace: e.backup.CredentialsSourceNamespace, Name: e.backup.CredentialsSecret}
+	if err := e.kc.Get(ctx, key, src); err != nil {
+		return nil, fmt.Errorf("canonical secret %s/%s: %w", key.Namespace, key.Name, err)
+	}
+	copyObj := map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Secret",
+		"metadata": map[string]any{
+			"name":      e.backup.CredentialsSecret,
+			"namespace": NamespaceName(w.ProjectID),
+			"labels":    commonLabels(w),
+		},
+	}
+	if t, found, _ := unstructured.NestedString(src.Object, "type"); found {
+		copyObj["type"] = t
+	}
+	if data, found, _ := unstructured.NestedMap(src.Object, "data"); found {
+		copyObj["data"] = data
+	}
+	return &unstructured.Unstructured{Object: copyObj}, nil
 }
 
 // clusterReady checks CNPG's observed status: readyInstances covering
