@@ -42,11 +42,11 @@ func TestTokensAreUnique(t *testing.T) {
 func TestWellFormed(t *testing.T) {
 	cases := map[string]bool{
 		"":                               false,
-		"ndb_":                           false,
+		"zdb_":                           false,
 		"nbt_" + strings.Repeat("a", 64): false, // Nimbus prefix, not ours
-		"ndb_" + strings.Repeat("a", 64): true,
-		"ndb_" + strings.Repeat("g", 64): false, // non-hex
-		"ndb_" + strings.Repeat("a", 63): false,
+		"zdb_" + strings.Repeat("a", 64): true,
+		"zdb_" + strings.Repeat("g", 64): false, // non-hex
+		"zdb_" + strings.Repeat("a", 63): false,
 	}
 	for in, want := range cases {
 		if got := WellFormed(in); got != want {

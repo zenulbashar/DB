@@ -8,7 +8,7 @@ summary: Where to find your connection string, why it's masked, and how the audi
 A connection string looks like:
 
 ```
-postgresql://<role>:<password>@ep-….syd1.db.nimbus.app/<database>?sslmode=require
+postgresql://<role>:<password>@ep-….syd1.db.zaleit.com.au/<database>?sslmode=require
 ```
 
 The console's **Connect** panel and `GET /projects/{prj}/connection-uri`
@@ -16,7 +16,7 @@ assemble it for you from a branch, endpoint kind, role, and database.
 
 ## Why the password shows as `****`
 
-NimbusDB treats passwords as **reveal-once** secrets:
+Zale DB treats passwords as **reveal-once** secrets:
 
 - A role's password is returned **exactly once** — when the role is created or
   its password is reset. It is stored encrypted and never re-displayed by

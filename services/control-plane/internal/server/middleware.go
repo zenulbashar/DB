@@ -84,7 +84,7 @@ func (s *Server) recoverer(next http.Handler) http.Handler {
 	})
 }
 
-// authenticate resolves the Bearer ndb_ token to a Principal. Routes mounted
+// authenticate resolves the Bearer zdb_ token to a Principal. Routes mounted
 // behind it always have a principal; scope checks happen per handler.
 func (s *Server) authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -92,7 +92,7 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 		token, ok := strings.CutPrefix(header, "Bearer ")
 		if !ok || !auth.WellFormed(strings.TrimSpace(token)) {
 			writeProblem(w, r, http.StatusUnauthorized, "unauthenticated",
-				"Authentication required", "Provide an API key: Authorization: Bearer ndb_…")
+				"Authentication required", "Provide an API key: Authorization: Bearer zdb_…")
 			return
 		}
 		key, err := s.store.FindAPIKeyByHash(r.Context(), auth.HashToken(strings.TrimSpace(token)))

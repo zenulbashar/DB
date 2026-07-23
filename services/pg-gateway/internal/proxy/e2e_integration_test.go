@@ -31,7 +31,7 @@ import (
 )
 
 const testEndpoint = "ep_e2etest"
-const testSNI = "ep-e2etest.syd1.db.nimbus.app"
+const testSNI = "ep-e2etest.syd1.db.zaleit.com.au"
 
 type testEnv struct {
 	addr    string // gateway listen addr
@@ -46,8 +46,8 @@ func selfSignedWildcard(t *testing.T) tls.Certificate {
 	}
 	tmpl := &x509.Certificate{
 		SerialNumber: big.NewInt(1),
-		Subject:      pkix.Name{CommonName: "*.syd1.db.nimbus.app"},
-		DNSNames:     []string{"*.syd1.db.nimbus.app"},
+		Subject:      pkix.Name{CommonName: "*.syd1.db.zaleit.com.au"},
+		DNSNames:     []string{"*.syd1.db.zaleit.com.au"},
 		NotBefore:    time.Now().Add(-time.Hour),
 		NotAfter:     time.Now().Add(time.Hour),
 		KeyUsage:     x509.KeyUsageDigitalSignature,
@@ -159,7 +159,7 @@ func TestGatewayOptionsFallback(t *testing.T) {
 func TestGatewayRejectsUnknownEndpoint(t *testing.T) {
 	env := startGateway(t, 0)
 	cfg := env.connCfg.Copy()
-	cfg.TLSConfig = &tls.Config{ServerName: "ep-nosuch.syd1.db.nimbus.app", InsecureSkipVerify: true}
+	cfg.TLSConfig = &tls.Config{ServerName: "ep-nosuch.syd1.db.zaleit.com.au", InsecureSkipVerify: true}
 
 	_, err := pgx.ConnectConfig(context.Background(), cfg)
 	if err == nil {
@@ -173,7 +173,7 @@ func TestGatewayRejectsUnknownEndpoint(t *testing.T) {
 func TestGatewayRejectsSuspendedEndpoint(t *testing.T) {
 	env := startGateway(t, 0)
 	cfg := env.connCfg.Copy()
-	cfg.TLSConfig = &tls.Config{ServerName: "ep-asleep.syd1.db.nimbus.app", InsecureSkipVerify: true}
+	cfg.TLSConfig = &tls.Config{ServerName: "ep-asleep.syd1.db.zaleit.com.au", InsecureSkipVerify: true}
 
 	_, err := pgx.ConnectConfig(context.Background(), cfg)
 	if err == nil || !strings.Contains(err.Error(), "suspended") {
@@ -284,7 +284,7 @@ func TestGatewayWakesSuspendedEndpoint(t *testing.T) {
 	host, port, _ := net.SplitHostPort(ln.Addr().String())
 	cfg.Host = host
 	cfg.Port = mustPort(t, port)
-	cfg.TLSConfig = &tls.Config{ServerName: "ep-wake.syd1.db.nimbus.app", InsecureSkipVerify: true}
+	cfg.TLSConfig = &tls.Config{ServerName: "ep-wake.syd1.db.zaleit.com.au", InsecureSkipVerify: true}
 	cfg.Fallbacks = nil
 
 	conn, err := pgx.ConnectConfig(ctx, cfg)

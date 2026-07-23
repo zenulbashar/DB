@@ -1,4 +1,4 @@
-// Command gateway runs the NimbusDB Postgres TCP gateway (ADR-007).
+// Command gateway runs the Zale DB Postgres TCP gateway (ADR-007).
 package main
 
 import (

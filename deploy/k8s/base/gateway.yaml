@@ -29,7 +29,7 @@ spec:
     spec:
       containers:
         - name: gateway
-          image: ghcr.io/zenulbashar/nimbusdb-gateway:latest
+          image: ghcr.io/zenulbashar/zaledb-gateway:latest
           imagePullPolicy: Always
           env:
             - name: PGGW_LISTEN_ADDR

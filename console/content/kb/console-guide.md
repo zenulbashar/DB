@@ -10,7 +10,7 @@ it does, you can also do with `curl` and an API key.
 
 ## Connect
 
-Paste an `ndb_` API key on the **Connect** screen. The console validates it
+Paste a `zdb_` API key on the **Connect** screen. The console validates it
 against the platform before storing it in an **httpOnly cookie** (30 days,
 never readable by page scripts). **Sign out** (top right) clears it. The
 console never displays your key back, and it never sees role passwords except

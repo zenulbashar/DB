@@ -13,11 +13,11 @@ fi
 mkdir -p "$(dirname "$OUT")"
 
 cat > "$OUT" <<EOF
-# NimbusDB self-host secrets (generated $(date -u +%FT%TZ)). chmod 600, back it
+# Zale DB self-host secrets (generated $(date -u +%FT%TZ)). chmod 600, back it
 # up somewhere safe, and REUSE IT on any replacement VM (ADR-020).
 
 # --- you fill these two in ---
-NDB_DOMAIN=CHANGE-ME.example.com      # your platform domain (console.<d>, api.<d>, *.syd1.<d>)
+NDB_DOMAIN=db.zaleit.com.au           # Zale DB platform domain (api./console./*.syd1. prefixes)
 CLOUDFLARE_API_TOKEN=                 # DNS-01 token for the wildcard cert (Zone:DNS:Edit). Leave
                                       # empty to handle the wildcard cert another way.
 

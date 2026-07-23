@@ -73,7 +73,7 @@ func TestProjectCreatesDefaultBranchWithEndpoints(t *testing.T) {
 		if !ok {
 			t.Fatalf("missing endpoint kind %s", kind)
 		}
-		if want := ".syd1.db.nimbus.app"; len(host) < len(want) || host[len(host)-len(want):] != want {
+		if want := ".syd1.db.zaleit.com.au"; len(host) < len(want) || host[len(host)-len(want):] != want {
 			t.Fatalf("endpoint host %q not in syd1 namespace", host)
 		}
 	}

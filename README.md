@@ -1,4 +1,4 @@
-# NimbusDB — Serverless PostgreSQL Platform
+# Zale DB — Serverless PostgreSQL Platform
 
 A multi-tenant managed/serverless PostgreSQL platform (Neon-class) that integrates with the
 [Nimbus hosting platform](https://github.com/zenulbashar/hosting), built to first migrate
@@ -54,7 +54,7 @@ k3s + CNPG + MinIO — see [`docs/deploy/AZURE_VM.md`](docs/deploy/AZURE_VM.md) 
 [`docs/deploy/BINARYLANE_MIGRATION.md`](docs/deploy/BINARYLANE_MIGRATION.md) (moving providers).
 Images build to GHCR on every merge to `main` (`.github/workflows/release.yml`).
 
-The console serves two shells: the tenant console at `/` (sign in with an `ndb_` API key; in-app
+The console serves two shells: the tenant console at `/` (sign in with a `zdb_` API key; in-app
 help at `/kb`) and the **operator console** at `/admin` (sign in with `NDB_ADMIN_TOKEN` —
 `make dev` exports `dev-admin-token`; see ADR-018).
 

@@ -13,7 +13,7 @@ export async function generateMetadata({
 }) {
   const article = getArticle((await params).slug);
   return article
-    ? { title: `${article.title} — NimbusDB KB`, description: article.summary }
+    ? { title: `${article.title} — Zale DB KB`, description: article.summary }
     : {};
 }
 

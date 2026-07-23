@@ -114,7 +114,7 @@ func indexNull(b []byte) int {
 }
 
 // EndpointFromSNI maps an SNI hostname to an endpoint ID:
-// ep-01abc….syd1.db.nimbus.app → ep_01abc… . Returns "" when the name is not
+// ep-01abc….syd1.db.zaleit.com.au → ep_01abc… . Returns "" when the name is not
 // in an endpoint namespace (DATABASE_ARCHITECTURE §5).
 func EndpointFromSNI(serverName string) string {
 	label, _, ok := strings.Cut(serverName, ".")

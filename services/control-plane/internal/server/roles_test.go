@@ -127,7 +127,7 @@ func TestConnectionURIMaskedAndReveal(t *testing.T) {
 	mustUnmarshal(t, body, &res)
 	if res.Revealed || !strings.Contains(res.URI, "shop_owner:****@") ||
 		!strings.HasSuffix(res.URI, "/shop?sslmode=require") ||
-		!strings.Contains(res.URI, ".syd1.db.nimbus.app") {
+		!strings.Contains(res.URI, ".syd1.db.zaleit.com.au") {
 		t.Fatalf("masked uri = %+v", res)
 	}
 

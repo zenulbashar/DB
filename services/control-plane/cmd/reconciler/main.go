@@ -1,4 +1,4 @@
-// Command reconciler runs the NimbusDB data-plane reconciler: it converges
+// Command reconciler runs the Zale DB data-plane reconciler: it converges
 // desired state from the control-plane database into CNPG/Kubernetes objects
 // and publishes the gateway route table.
 package main

@@ -1,4 +1,4 @@
-# Migration Strategy — NimbusDB
+# Migration Strategy — Zale DB
 
 **Status:** Draft v0.1 · Engine ships Phase 5; §6–7 are the concrete runbooks for the first two production migrations, grounded in analysis of both codebases (2026-07-17).
 
@@ -100,7 +100,7 @@ Both apps (facts from repo analysis):
 - Auth.js **database sessions** — carrying the `session` tables over (which logical replication
   does) preserves logins; a dump/restore cutover would too, but a "fresh schema" cutover would
   log every user out. Plan: carry sessions.
-- Vercel `syd1` + Neon `ap-southeast-2` today → NimbusDB `syd1` keeps latency flat.
+- Vercel `syd1` + Neon `ap-southeast-2` today → Zale DB `syd1` keeps latency flat.
 - Both currently ship `?sslmode=require` — endpoint parity, no app change.
 
 ## 6. Runbook: Roster (`zenulbashar/roster-tool`)
@@ -157,6 +157,6 @@ schema + representative data volume before the real windows (Phase 5 acceptance)
 
 - Neon org closure after both grace windows; final logical dumps archived to platform object
   storage (encrypted) for 90 days.
-- Both apps' `.env.example`/README connection docs updated to NimbusDB shapes (PRs in their repos).
+- Both apps' `.env.example`/README connection docs updated to Zale DB shapes (PRs in their repos).
 - Lessons-learned written into the adapter preflight rules (the whole point of eating our own
   migration path before external tenants use it).

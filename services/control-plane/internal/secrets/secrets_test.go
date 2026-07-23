@@ -22,7 +22,7 @@ func TestRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	secret := []byte("postgresql://app:hunter2@ep-x.syd1.db.nimbus.app/db")
+	secret := []byte("postgresql://app:hunter2@ep-x.syd1.db.zaleit.com.au/db")
 	blob, ver, err := kr.Encrypt(secret)
 	if err != nil {
 		t.Fatal(err)

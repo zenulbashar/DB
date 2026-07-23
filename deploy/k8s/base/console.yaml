@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: console
-          image: ghcr.io/zenulbashar/nimbusdb-console:latest
+          image: ghcr.io/zenulbashar/zaledb-console:latest
           imagePullPolicy: Always
           envFrom:
             - secretRef: { name: ndb-console-env }

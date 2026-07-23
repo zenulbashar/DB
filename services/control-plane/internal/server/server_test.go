@@ -141,7 +141,7 @@ func TestAuthRequired(t *testing.T) {
 	if status != http.StatusUnauthorized {
 		t.Fatalf("no token = %d, want 401", status)
 	}
-	status, _ = do(t, e.h, "GET", "/v1/orgs", "ndb_"+fmt.Sprintf("%064x", 0), nil, nil)
+	status, _ = do(t, e.h, "GET", "/v1/orgs", "zdb_"+fmt.Sprintf("%064x", 0), nil, nil)
 	if status != http.StatusUnauthorized {
 		t.Fatalf("unknown token = %d, want 401", status)
 	}

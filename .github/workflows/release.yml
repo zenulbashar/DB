@@ -46,7 +46,7 @@ jobs:
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/nimbusdb-${{ matrix.image.name }}
+          images: ghcr.io/${{ github.repository_owner }}/zaledb-${{ matrix.image.name }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha,format=long

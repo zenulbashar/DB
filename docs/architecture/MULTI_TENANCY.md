@@ -1,4 +1,4 @@
-# Multi-Tenancy Model — NimbusDB
+# Multi-Tenancy Model — Zale DB
 
 **Status:** Draft v0.1
 
@@ -21,8 +21,8 @@ Organization (billing + isolation boundary)
   customer apps already separate prod (Neon main) from dev (docker-compose), and how Nimbus
   targets env vars (`production,preview,development`).
 
-Mapping to Nimbus for Phase 6: Nimbus `team` ↔ NimbusDB `org` (soft link), Nimbus `project` ↔
-NimbusDB `project` (soft link). Links are stored as IDs+URLs on both sides, no cross-system
+Mapping to Nimbus for Phase 6: Nimbus `team` ↔ Zale DB `org` (soft link), Nimbus `project` ↔
+Zale DB `project` (soft link). Links are stored as IDs+URLs on both sides, no cross-system
 foreign keys; either side can detach (SYSTEM_ARCHITECTURE §7).
 
 ## 2. Isolation layers (defence in depth)
@@ -54,7 +54,7 @@ foreign keys; either side can detach (SYSTEM_ARCHITECTURE §7).
 - **Users** authenticate to the console (OIDC/email — SECURITY_MODEL §3); org membership roles:
   `owner` (billing, delete, member admin), `admin` (all resources), `member` (create/use
   branches, no destructive prod ops), `viewer` (read-only).
-- **API keys**: org-scoped, hashed at rest (SHA-256, `ndb_` prefix — mirrors Nimbus's `nbt_`
+- **API keys**: org-scoped, hashed at rest (SHA-256, `zdb_` prefix — mirrors Nimbus's `nbt_`
   pattern), explicit scope list, optional expiry, revocable, last-used tracking. Keys never
   grant console login.
 - **Service integrations** (Nimbus): a dedicated key kind with only the scopes the integration

@@ -126,7 +126,7 @@ type Project struct {
 // baseDomain is the platform's DNS suffix for endpoint hosts and problem-type
 // URIs. Configurable for self-hosting (NDB_DOMAIN, ADR-020); set ONCE at boot
 // via SetBaseDomain before any request is served — never mutated after.
-var baseDomain = "db.nimbus.app"
+var baseDomain = "db.zaleit.com.au"
 
 // SetBaseDomain overrides the platform DNS suffix (boot-time only).
 func SetBaseDomain(d string) {
@@ -135,7 +135,7 @@ func SetBaseDomain(d string) {
 	}
 }
 
-// BaseDomain returns the platform DNS suffix (e.g. "db.nimbus.app").
+// BaseDomain returns the platform DNS suffix (e.g. "db.zaleit.com.au").
 func BaseDomain() string { return baseDomain }
 
 // EndpointHost derives the stable connect hostname for an endpoint ID

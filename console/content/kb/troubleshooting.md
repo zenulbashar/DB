@@ -27,7 +27,7 @@ Keep `sslmode=require`; endpoints do not accept plaintext.
 
 ## API errors
 
-**`401 unauthorized`** — key missing, malformed (must start with `ndb_`),
+**`401 unauthorized`** — key missing, malformed (must start with `zdb_`),
 revoked, or expired. Check `GET /orgs/{org}/api-keys` for `revoked_at` /
 `expires_at`.
 

@@ -1,6 +1,6 @@
-# Design System Mapping — NimbusDB Console
+# Design System Mapping — Zale DB Console
 
-**Status:** Draft v0.1 · **Open input:** no dedicated design export for the NimbusDB console has been provided yet (see §5). This document fixes the interim design direction and the mapping method so a future export drops in without rework.
+**Status:** Draft v0.1 · **Open input:** no dedicated design export for the Zale DB console has been provided yet (see §5). This document fixes the interim design direction and the mapping method so a future export drops in without rework.
 
 ---
 
@@ -8,8 +8,8 @@
 
 | Source | What it is | Relevance |
 |---|---|---|
-| **Nimbus design language** (`hosting/src/app/globals.css`, `hosting/src/components/ui.tsx`) | Tailwind v4 `@theme` tokens: dark UI (`--color-background #0a0a0a`, surface/edge scales), accent blue `#0070f3`, signature forest-green header (`--color-forest #13301f`), success/warning/danger tokens, `--font-sans/--font-mono`; bespoke primitives: `Button`, `ButtonLink`, `Input`, `Label`, `Select`, `Card`, `Badge`, `StatusDot`, `Spinner`, `EmptyState`, `PageHeader`. | **Adopted as the console's base design language** (ADR-009): NimbusDB is part of the Nimbus platform family; a database console reached from Nimbus must feel native to it. |
-| **Prompt2Eat design handoff** (`order-tool/design/design_handoff_prompt2eat/`) | High-fidelity export: `tokens.css` (CSS custom properties + keyframes), `tailwind.theme.js`, component state catalogue (buttons/inputs × default/hover/focus/loading/disabled), screens, per-block PNGs. | **Not** the console's visual identity (it is Prompt2Eat's product brand — cream/amber/forest ink). Adopted as the **handoff format and token-layer method**: its `tokens.css` structure (framework-agnostic custom properties → Tailwind `@theme`) is exactly how the console's token layer is built, and any future NimbusDB design export is expected in this bundle shape. |
+| **Nimbus design language** (`hosting/src/app/globals.css`, `hosting/src/components/ui.tsx`) | Tailwind v4 `@theme` tokens: dark UI (`--color-background #0a0a0a`, surface/edge scales), accent blue `#0070f3`, signature forest-green header (`--color-forest #13301f`), success/warning/danger tokens, `--font-sans/--font-mono`; bespoke primitives: `Button`, `ButtonLink`, `Input`, `Label`, `Select`, `Card`, `Badge`, `StatusDot`, `Spinner`, `EmptyState`, `PageHeader`. | **Adopted as the console's base design language** (ADR-009): Zale DB is part of the Nimbus platform family; a database console reached from Nimbus must feel native to it. |
+| **Prompt2Eat design handoff** (`order-tool/design/design_handoff_prompt2eat/`) | High-fidelity export: `tokens.css` (CSS custom properties + keyframes), `tailwind.theme.js`, component state catalogue (buttons/inputs × default/hover/focus/loading/disabled), screens, per-block PNGs. | **Not** the console's visual identity (it is Prompt2Eat's product brand — cream/amber/forest ink). Adopted as the **handoff format and token-layer method**: its `tokens.css` structure (framework-agnostic custom properties → Tailwind `@theme`) is exactly how the console's token layer is built, and any future Zale DB design export is expected in this bundle shape. |
 
 ## 2. Token layer (`/console/src/app/globals.css`, Tailwind v4 `@theme`)
 

@@ -1,4 +1,4 @@
-# Security Model — NimbusDB
+# Security Model — Zale DB
 
 **Status:** Draft v0.1 · SOC2-ready by design; certification work is Phase 7.
 
@@ -35,7 +35,7 @@
 - **Console users:** email magic-link at minimum (parity with both customer apps' Auth.js
   usage), OIDC (Google/GitHub) next; MFA (TOTP/WebAuthn) required for org `owner`/`admin` from
   Phase 7. Sessions: httpOnly, SameSite=lax, 30-day server-side sessions, revocable.
-- **API keys:** `ndb_` prefix + 256-bit random; SHA-256 hash stored; scopes required at creation;
+- **API keys:** `zdb_` prefix + 256-bit random; SHA-256 hash stored; scopes required at creation;
   shown once. (Deliberately the same shape as Nimbus's `nbt_` tokens — one mental model.)
 - **Service-to-service (internal):** mTLS via cluster PKI (cert-manager); SPIFFE-style
   identities per service; no shared static internal secrets. **Exception (interim):** the
@@ -55,7 +55,7 @@
   surface is disabled entirely when unset). It is a high-value secret (R-17): reads are
   privileged cross-tenant aggregates; fix actions reuse the tenant state machine and are written
   to the affected tenant's audit log (`actor_type: system`, `actor_id: platform_admin`), so
-  operator interventions are tenant-visible. Tenant `ndb_` keys can never open `/admin`, and the
+  operator interventions are tenant-visible. Tenant `zdb_` keys can never open `/admin`, and the
   admin token opens nothing else. Destructive operations (tenant deletes, plan overrides) are
   excluded from the v1 surface by design.
 
@@ -80,7 +80,7 @@
 | Import worker credential *use* (source/target connection secrets in flight) | Decrypted only inside the privileged import worker's memory (never on the tenant HTTP path). When handed to child tools (`pg_dump`/`pg_restore`) the password is passed via `PGPASSWORD`, **never on `argv`** (which is world-readable in `ps`/`/proc/<pid>/cmdline`). When embedded in a libpq conninfo for the target's `CREATE SUBSCRIPTION`, every keyword value is quoted/escaped so a credential containing whitespace/quote/backslash cannot break the string or inject a keyword. Connection-URL parse failures are surfaced with the URL redacted. |
 | Idempotency response cache | Create responses carry one-time secrets (API tokens, DB passwords). The cached body in `idempotency_keys` is envelope-encrypted with the same keyring so no plaintext credential persists at rest; the caller still receives plaintext on the live call and on replay. (Same-key requests are also serialized per instance so two racing POSTs cannot both create resources.) |
 | Platform component secrets (control-plane DB creds, NATS creds) | Kubernetes Secrets sourced via External Secrets Operator from the KMS-backed store; **SOPS(age)-encrypted** in git where GitOps requires them. Never plaintext in git. |
-| TLS | cert-manager: public certs via ACME (Let's Encrypt) for `*.{region}.db.nimbus.app` (wildcard, DNS-01); internal mTLS via private CA. Postgres endpoints TLS-required (`sslmode=require` minimum; `verify-full` documented and supported). |
+| TLS | cert-manager: public certs via ACME (Let's Encrypt) for `*.{region}.db.zaleit.com.au` (wildcard, DNS-01); internal mTLS via private CA. Postgres endpoints TLS-required (`sslmode=require` minimum; `verify-full` documented and supported). |
 | At rest | Storage-class encryption for PVCs; SSE for object storage; control-plane DB on encrypted volumes. Backups additionally client-side encrypted (Barman Cloud AES) from Phase 2. |
 | In transit | TLS 1.2+ everywhere external; mTLS internal; no plaintext Postgres listeners. |
 

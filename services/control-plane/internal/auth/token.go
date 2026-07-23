@@ -1,4 +1,4 @@
-// Package auth implements ndb_ API-key material handling per SECURITY_MODEL §3:
+// Package auth implements zdb_ API-key material handling per SECURITY_MODEL §3:
 // 256-bit random tokens, SHA-256 hashed at rest, shown exactly once at creation.
 package auth
 
@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	TokenPrefix = "ndb_"
+	TokenPrefix = "zdb_"
 	// PrefixLen is how many leading characters of the token are stored and
 	// listed for identification (api/openapi.yaml ApiKey.prefix).
 	PrefixLen = 12

@@ -67,11 +67,11 @@ func TestReadInitialRejectsUnknownProtocol(t *testing.T) {
 
 func TestEndpointFromSNI(t *testing.T) {
 	cases := map[string]string{
-		"ep-01abc.syd1.db.nimbus.app": "ep_01abc",
-		"api.db.nimbus.app":           "",
-		"ep-x":                        "", // no domain suffix
-		"":                            "",
-		"epx.syd1.db.nimbus.app":      "",
+		"ep-01abc.syd1.db.zaleit.com.au": "ep_01abc",
+		"api.db.zaleit.com.au":           "",
+		"ep-x":                           "", // no domain suffix
+		"":                               "",
+		"epx.syd1.db.zaleit.com.au":      "",
 	}
 	for in, want := range cases {
 		if got := EndpointFromSNI(in); got != want {
