@@ -16,6 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 
 	appcfg "github.com/zenulbashar/DB/services/control-plane/internal/config"
+	"github.com/zenulbashar/DB/services/control-plane/internal/domain"
 	"github.com/zenulbashar/DB/services/control-plane/internal/reconciler"
 	"github.com/zenulbashar/DB/services/control-plane/internal/store/postgres"
 )
@@ -35,6 +36,7 @@ func main() {
 		log.Error("config", "err", err)
 		os.Exit(1)
 	}
+	domain.SetBaseDomain(cfg.Domain)
 	interval := 10 * time.Second
 	if v := os.Getenv("NDB_RECONCILE_INTERVAL"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
@@ -69,6 +71,9 @@ func main() {
 			BucketBase:        bucket,
 			EndpointURL:       os.Getenv("NDB_BACKUP_ENDPOINT_URL"),
 			CredentialsSecret: getenvDefault("NDB_BACKUP_CREDENTIALS_SECRET", "ndb-backup-credentials"),
+			// The reconciler replicates this secret into each tenant namespace;
+			// set to "" if secrets are provisioned externally (e.g. ESO).
+			CredentialsSourceNamespace: getenvDefault("NDB_BACKUP_CREDENTIALS_NAMESPACE", reconciler.PlatformNamespace),
 		}
 	} else if os.Getenv("NDB_ENV") != "dev" {
 		log.Error("NDB_BACKUP_BUCKET is required outside dev: tenant clusters must archive WAL (DATABASE_ARCHITECTURE §3, risk R-2)")

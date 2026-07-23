@@ -22,10 +22,14 @@ type BackupConfig struct {
 	// BucketBase, e.g. "s3://ndb-syd1-wal" — per-project/branch prefixes are
 	// appended (bucket layout per DATABASE_ARCHITECTURE §2).
 	BucketBase string
-	// CredentialsSecret is the k8s Secret (in each project namespace,
-	// replicated by the reconciler's secret sync — Phase 2 pending item)
-	// holding ACCESS_KEY_ID / ACCESS_SECRET_KEY.
+	// CredentialsSecret is the k8s Secret (in each project namespace) holding
+	// ACCESS_KEY_ID / ACCESS_SECRET_KEY for the archive store.
 	CredentialsSecret string
+	// CredentialsSourceNamespace is where the canonical copy of that secret
+	// lives (NDB_BACKUP_CREDENTIALS_NAMESPACE, default nimbusdb-platform); the
+	// reconciler replicates it into each tenant namespace at provision time.
+	// Empty disables replication (secrets provisioned externally).
+	CredentialsSourceNamespace string
 }
 
 // destinationPath isolates each branch's WAL/backup stream.

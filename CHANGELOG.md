@@ -2,6 +2,31 @@
 
 All notable changes to this repository. Format loosely follows [Keep a Changelog](https://keepachangelog.com/); one entry per phase gate plus notable intermediate merges.
 
+## [Deploy — self-host enablers: configurable domain + credentials replication (ADR-020)] — 2026-07-20
+
+First increment of the self-host deployment profile (Azure VM now → Binary Lane VPS later).
+
+### Decided (ADR-020)
+- A **single-node self-host profile** (k3s + CNPG + MinIO + cert-manager on one VM, images from
+  GHCR) is a supported substrate beside the ADR-005 cloud profile. Provider-specific surface is
+  VM + firewall + DNS only, so the later Azure→Binary Lane move is a bootstrap + data-sync + DNS
+  flip.
+
+### Added
+- **`NDB_DOMAIN`** (default `db.nimbus.app` — nothing changes for existing deployments): sets the
+  endpoint-host suffix (`ep-….<region>.<domain>`) and the RFC 9457 problem-type URI base. Wired in
+  all three binaries at boot (`domain.SetBaseDomain`).
+- **Backup-credentials replication** — the barman spec always referenced a per-tenant-namespace
+  secret that nothing created (an acknowledged pending item). The reconciler now replicates the
+  canonical secret from `NDB_BACKUP_CREDENTIALS_NAMESPACE` (default `nimbusdb-platform`) into each
+  tenant namespace at provision time; a missing canonical secret **fails provisioning loudly**
+  (R-2), and an empty source namespace disables replication (externally-managed secrets).
+
+### Tests
+- Domain override + empty-set no-op; provision replicates the secret with its data; missing
+  canonical secret errors and the branch never goes ready; empty source namespace preserves the
+  old behavior. Full suites green.
+
 ## [Resilience — restore-verification loop] — 2026-07-20
 
 R-2's "automated restore-verification" stops being a doc promise: the reconciler now proves

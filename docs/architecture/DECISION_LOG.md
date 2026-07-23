@@ -275,6 +275,33 @@ poolers at 1 replica (rejected — cheap fix, real blast radius); tuning `failov
 documented honestly in DATABASE_ARCHITECTURE; the WAL archive keeps RPO bounded regardless.
 Docs (SYSTEM §5, DATABASE §"HA", R-2) now cite this ADR instead of promising unbuilt behavior.
 
+## ADR-020 · A single-node self-host profile (k3s + CNPG + MinIO on one VM) is a supported substrate, and the platform domain is configurable — `accepted`
+**Context:** The owner wants to run the platform on an Azure VM now (~$230 credit) and move to a
+Binary Lane VPS (Sydney) later with minimal admin effort. The documented substrate (ADR-005:
+managed k8s + cloud object storage/KMS) is right for GA but wrong for this budget, and anything
+Azure-managed (AKS, Azure Database, Blob, Key Vault) would make the later move a re-architecture.
+Two blockers were code-level: the endpoint domain `db.nimbus.app` was hardcoded, and the barman
+spec referenced a per-tenant-namespace credentials secret nothing actually created.
+**Decision:** define a **self-host profile** that treats any provider as a dumb VM: **k3s**
+(single node — the reconciler is a k8s controller, so a k8s API is non-negotiable; k3s is the
+lightest one and ships Traefik + klipper-lb), **CNPG** for all Postgres including the control
+plane's, **MinIO** in-cluster as the S3-compatible archive store (the abstraction R-10 preserved),
+**cert-manager** for TLS (wildcard via DNS-01 for the gateway's SNI hosts), images from **GHCR**.
+Provider-specific surface = VM + firewall + DNS records only; migration = same bootstrap script +
+MinIO mirror + control-plane restore + DNS flip. Enabling code changes: (a) **`NDB_DOMAIN`**
+(default `db.nimbus.app`) configures the endpoint-host suffix (`domain.SetBaseDomain`, boot-time
+only) and the problem-type URI base; (b) the reconciler **replicates the backup-credentials
+secret** from `NDB_BACKUP_CREDENTIALS_NAMESPACE` (default `nimbusdb-platform`) into each tenant
+namespace at provision time — a missing canonical secret fails provisioning loudly (R-2), and an
+empty source namespace disables replication for externally-managed setups.
+**Alternatives:** docker-compose (rejected — no k8s API, the data plane can't run); managed AKS
+now (rejected — lock-in + cost burns the credit in weeks); k8s-less rewrite of the reconciler
+(rejected — Gen-2-scale effort for a hosting preference).
+**Consequences:** one VM is a single failure domain — the WAL archive + restore-verification loop
+are the durability net (R-2), and the profile documents that honestly (RISK_REGISTER). The cloud
+profile (ADR-005) is unchanged and remains the GA target; the self-host manifests double as its
+starting point.
+
 ---
 
 ## Open questions — **all answered by owner, 2026-07-17**
