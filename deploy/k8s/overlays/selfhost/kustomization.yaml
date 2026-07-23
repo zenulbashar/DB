@@ -1,0 +1,8 @@
+# Self-host overlay (ADR-020): base as-is. Domain-dependent resources
+# (ClusterIssuer, Certificates, Ingresses) are rendered by
+# deploy/vm/bootstrap.sh from NDB_DOMAIN into /etc/nimbusdb/generated and
+# applied alongside — kustomize stays static, the domain stays yours.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base

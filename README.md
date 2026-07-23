@@ -49,6 +49,11 @@ make smoke         # end-to-end: bootstrap + create a project via the API, then 
 The data plane (per-tenant Postgres clusters) needs a `kind` cluster with CloudNativePG — see
 `tools/dev-up.sh`. The control plane, console, and import engine run without it.
 
+**Deploying for real:** the self-host profile (ADR-020) runs the whole platform on one VM with
+k3s + CNPG + MinIO — see [`docs/deploy/AZURE_VM.md`](docs/deploy/AZURE_VM.md) (setup) and
+[`docs/deploy/BINARYLANE_MIGRATION.md`](docs/deploy/BINARYLANE_MIGRATION.md) (moving providers).
+Images build to GHCR on every merge to `main` (`.github/workflows/release.yml`).
+
 The console serves two shells: the tenant console at `/` (sign in with an `ndb_` API key; in-app
 help at `/kb`) and the **operator console** at `/admin` (sign in with `NDB_ADMIN_TOKEN` —
 `make dev` exports `dev-admin-token`; see ADR-018).

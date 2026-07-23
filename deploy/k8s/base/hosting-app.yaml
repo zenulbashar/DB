@@ -1,0 +1,35 @@
+# Nimbus hosting app — deployed beside the console. Its source lives in a
+# separate repo; build/push its image there (or docker build on the VM and
+# `k3s ctr images import`). Scaled to 0 until the image exists; set the image
+# and `kubectl -n nimbusdb-platform scale deploy/nimbus-hosting --replicas=1`.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nimbus-hosting
+  namespace: nimbusdb-platform
+spec:
+  replicas: 0
+  selector:
+    matchLabels: { app: nimbus-hosting }
+  template:
+    metadata:
+      labels: { app: nimbus-hosting }
+    spec:
+      containers:
+        - name: hosting
+          image: ghcr.io/zenulbashar/nimbus-hosting:latest # placeholder — build from the hosting repo
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3000
+          resources:
+            requests: { cpu: 200m, memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nimbus-hosting
+  namespace: nimbusdb-platform
+spec:
+  selector: { app: nimbus-hosting }
+  ports:
+    - port: 3000

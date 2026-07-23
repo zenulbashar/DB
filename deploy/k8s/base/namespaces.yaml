@@ -1,0 +1,21 @@
+# Platform namespaces (self-host profile, ADR-020). Tenant namespaces
+# (prj-<ulid>) are created by the reconciler, not listed here.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nimbusdb-platform
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nimbusdb-gateway
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nimbusdb-monitoring
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: minio

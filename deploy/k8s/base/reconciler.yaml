@@ -1,0 +1,36 @@
+# Data-plane reconciler: converges branches into CNPG objects, publishes the
+# gateway route table, replicates backup credentials into tenant namespaces,
+# and runs the restore-verification loop. Env from secret `ndb-reconciler-env`
+# (bootstrap.sh): DATABASE_URL, NDB_KEKS, NDB_ACTIVE_KEK, NDB_ENV, NDB_DOMAIN,
+# NDB_BACKUP_BUCKET=s3://ndb-wal, NDB_BACKUP_ENDPOINT_URL, NDB_VERIFY_INTERVAL.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ndb-reconciler
+  namespace: nimbusdb-platform
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate # one reconciler at a time (leader election arrives with the cloud profile)
+  selector:
+    matchLabels: { app: ndb-reconciler }
+  template:
+    metadata:
+      labels: { app: ndb-reconciler }
+    spec:
+      serviceAccountName: nimbusdb-reconciler
+      containers:
+        - name: reconciler
+          image: ghcr.io/zenulbashar/nimbusdb-reconciler:latest
+          imagePullPolicy: Always
+          envFrom:
+            - secretRef: { name: ndb-reconciler-env }
+          ports:
+            - containerPort: 8081
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8081 }
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8081 }
+            initialDelaySeconds: 10
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
