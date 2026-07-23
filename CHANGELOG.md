@@ -2,6 +2,39 @@
 
 All notable changes to this repository. Format loosely follows [Keep a Changelog](https://keepachangelog.com/); one entry per phase gate plus notable intermediate merges.
 
+## [Deploy — self-host kit: k8s manifests, bootstrap, Azure & Binary Lane runbooks] — 2026-07-20
+
+The rest of the self-host profile (ADR-020): everything between a fresh VM and a serving platform.
+
+### Added
+- **`deploy/k8s/base/`** — runnable manifests (filling the previously-empty documented layout):
+  platform namespaces, MinIO (+ WAL-bucket init Job), the control-plane DB as a CNPG cluster
+  (archived to MinIO with a nightly base backup — the control plane has PITR too), api /
+  reconciler / import-worker / console Deployments, reconciler ServiceAccount + cluster RBAC,
+  pg-gateway (routes ConfigMap seed + wildcard-TLS mount + LoadBalancer :5432 via klipper-lb),
+  and a scaled-to-zero **hosting-app** stub for the Nimbus hosting repo's image.
+  `overlays/selfhost/` is the applied entrypoint (also the path the existing ArgoCD app expects).
+- **`deploy/vm/gen-secrets.sh`** — generates `/etc/nimbusdb/secrets.env` once (KEK, bootstrap/
+  gateway/admin tokens, DB + MinIO credentials); refuses to overwrite. **`deploy/vm/bootstrap.sh`**
+  — idempotent, provider-agnostic: k3s + cert-manager + CNPG (pinned), all k8s secrets from
+  secrets.env, base manifests, and the domain-dependent Issuer/wildcard-Certificate/Ingresses
+  rendered from `NDB_DOMAIN` (Cloudflare DNS-01 first-class; documented fallback without it).
+- **Runbooks:** `docs/deploy/AZURE_VM.md` (az CLI VM + NSG + static IP, DNS records with TTL 300,
+  sizing/cost table for the $230 credit, bootstrap, first-run verification, day-2) and
+  `docs/deploy/BINARYLANE_MIGRATION.md` (same secrets.env ⇒ zero reconfiguration; `mc mirror` the
+  archives; control-plane restored by CNPG recovery; tenants re-provision from mirrored WAL;
+  DNS flip bounded by TTL 300; rollback path; the migration doubles as the R-2 restore drill).
+
+### Docs
+- DEPLOYMENT_ARCHITECTURE §1 self-host profile note; RISK_REGISTER **R-18** (single-VM failure
+  domain, accepted consciously with the WAL-archive net); README deploy pointers.
+
+### Verified
+- All manifests parse (26 docs); scripts pass `bash -n`; wiring (names, ports, env vars, secret
+  keys, namespaces, routes-file contract) cross-checked against the code inventory. Full cluster
+  verification happens on the Azure VM per the runbook's §4 — the first run of the reconciler
+  against a real Kubernetes API.
+
 ## [Deploy — container images + GHCR release pipeline] — 2026-07-20
 
 ### Added

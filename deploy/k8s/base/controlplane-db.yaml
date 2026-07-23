@@ -1,0 +1,53 @@
+# Control-plane Postgres as a CNPG cluster (self-host profile, ADR-020):
+# single instance, archived to MinIO like every tenant DB — so the control
+# plane itself has PITR and the Binary Lane migration can restore from the
+# same archive. Secrets created by bootstrap.sh:
+#   ndb-app-db-credentials  (basic-auth: username=ndb_app, password=…)
+#   ndb-backup-credentials  (ACCESS_KEY_ID / ACCESS_SECRET_KEY — the canonical
+#                            copy the reconciler replicates to tenants)
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: ndb-controlplane
+  namespace: nimbusdb-platform
+spec:
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:17
+  storage:
+    size: 10Gi
+  resources:
+    requests: { cpu: 500m, memory: 1Gi }
+    limits: { cpu: "1", memory: 2Gi }
+  enableSuperuserAccess: false
+  bootstrap:
+    initdb:
+      database: nimbusdb_cp
+      owner: ndb_app
+      secret:
+        name: ndb-app-db-credentials
+  backup:
+    retentionPolicy: 14d
+    barmanObjectStore:
+      destinationPath: s3://ndb-wal/controlplane
+      endpointURL: http://minio.minio.svc:9000
+      s3Credentials:
+        accessKeyId:
+          name: ndb-backup-credentials
+          key: ACCESS_KEY_ID
+        secretAccessKey:
+          name: ndb-backup-credentials
+          key: ACCESS_SECRET_KEY
+      wal:
+        compression: gzip
+---
+# Nightly base backup of the control-plane DB.
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: ndb-controlplane-nightly
+  namespace: nimbusdb-platform
+spec:
+  schedule: "0 30 16 * * *" # 02:30 AEST
+  backupOwnerReference: self
+  cluster:
+    name: ndb-controlplane

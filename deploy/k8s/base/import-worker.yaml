@@ -1,0 +1,28 @@
+# Import worker: drives dump/restore + logical-replication imports against the
+# control-plane state machine. Env from secret `ndb-import-worker-env`
+# (bootstrap.sh): DATABASE_URL, NDB_KEKS, NDB_ACTIVE_KEK, NDB_ENV.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ndb-import-worker
+  namespace: nimbusdb-platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: ndb-import-worker }
+  template:
+    metadata:
+      labels: { app: ndb-import-worker }
+    spec:
+      containers:
+        - name: import-worker
+          image: ghcr.io/zenulbashar/nimbusdb-import-worker:latest
+          imagePullPolicy: Always
+          envFrom:
+            - secretRef: { name: ndb-import-worker-env }
+          ports:
+            - containerPort: 8082
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8082 }
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }

@@ -1,0 +1,13 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespaces.yaml
+  - minio.yaml
+  - controlplane-db.yaml
+  - rbac.yaml
+  - api.yaml
+  - reconciler.yaml
+  - import-worker.yaml
+  - console.yaml
+  - gateway.yaml
+  - hosting-app.yaml

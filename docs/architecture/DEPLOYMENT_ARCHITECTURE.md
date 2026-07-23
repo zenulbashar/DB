@@ -17,6 +17,14 @@ Terraform module on quota/pricing at bootstrap time.
 Requirements any substrate must meet: CSI snapshots + expansion, ≥ 2 AZs (or failure domains),
 S3-compatible object storage in-region, KMS or HSM-equivalent, L4 load balancer for the gateway.
 
+**Self-host profile (ADR-020, pre-GA):** a deliberate single-VM exception to the above — k3s +
+CNPG + in-cluster MinIO + cert-manager, images from GHCR, klipper-lb binding the gateway to the
+VM's public IP. Consciously trades the multi-AZ substrate for cost (risk R-18; WAL archives are
+the durability net). Deploy kit: `deploy/docker/`, `deploy/k8s/base/` +
+`overlays/selfhost/`, `deploy/vm/{gen-secrets.sh,bootstrap.sh}`; runbooks:
+`docs/deploy/AZURE_VM.md`, `docs/deploy/BINARYLANE_MIGRATION.md`. The cloud profile below is
+unchanged and remains the GA target; these manifests are its starting point.
+
 ## 2. Environments
 
 | Env | Purpose | Shape |
