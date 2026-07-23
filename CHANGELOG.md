@@ -2,6 +2,25 @@
 
 All notable changes to this repository. Format loosely follows [Keep a Changelog](https://keepachangelog.com/); one entry per phase gate plus notable intermediate merges.
 
+## [Deploy — container images + GHCR release pipeline] — 2026-07-20
+
+### Added
+- **Dockerfiles** (`deploy/docker/`) for all five deployables: api / reconciler / import-worker
+  (multi-stage Go; distroless runtimes except import-worker, which carries PGDG `postgresql-client-17`
+  for `pg_dump`/`pg_restore`), and the console (Next.js **standalone** output — enabled in
+  `next.config.ts` with `outputFileTracingRoot` at the repo root so the file-dep `@nimbusdb/api-client`
+  and `content/kb` are traced in). Base images are `ARG`-parameterized (docker.io defaults).
+- **`.github/workflows/release.yml`** — on push to `main`, builds and pushes all five images to
+  GHCR (`ghcr.io/zenulbashar/nimbusdb-*`, tags `latest` + full SHA) with per-image build caching.
+  GHCR is provider-neutral: the Azure VM and the Binary Lane VPS pull identical digests (ADR-020).
+
+### Verified
+- Local docker builds: gateway, api, reconciler, console build end-to-end; runtime smoke — api and
+  gateway boot to their expected config gates, the console container serves `/kb` (200 + content).
+  import-worker's apt step is blocked by this sandbox's HTTP proxy policy (403 on `deb.debian.org:80`)
+  — a standard PGDG install that the GH Actions run validates post-merge.
+- Console standalone bundle verified directly: server boots, all 17 KB articles traced in.
+
 ## [Deploy — self-host enablers: configurable domain + credentials replication (ADR-020)] — 2026-07-20
 
 First increment of the self-host deployment profile (Azure VM now → Binary Lane VPS later).

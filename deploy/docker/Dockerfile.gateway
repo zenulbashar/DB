@@ -1,0 +1,15 @@
+# pg-gateway (services/pg-gateway/cmd/gateway) — the TCP data path.
+ARG GO_IMAGE=golang:1.24
+ARG RUNTIME_IMAGE=gcr.io/distroless/static-debian12:nonroot
+FROM ${GO_IMAGE} AS build
+WORKDIR /src
+COPY services/pg-gateway/go.mod services/pg-gateway/go.sum services/pg-gateway/
+RUN cd services/pg-gateway && go mod download
+COPY services/pg-gateway/ services/pg-gateway/
+RUN cd services/pg-gateway && \
+    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/gateway ./cmd/gateway
+
+FROM ${RUNTIME_IMAGE}
+COPY --from=build /out/gateway /gateway
+EXPOSE 5432 9090
+ENTRYPOINT ["/gateway"]

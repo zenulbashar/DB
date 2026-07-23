@@ -1,0 +1,30 @@
+# Import worker (services/control-plane/cmd/import-worker). The dump/restore
+# mode shells out to pg_dump/pg_restore, so this image carries PGDG client 17
+# (must be >= the newest source/target server major).
+ARG GO_IMAGE=golang:1.24
+ARG RUNTIME_IMAGE=debian:bookworm-slim
+FROM ${GO_IMAGE} AS build
+WORKDIR /src
+COPY services/import-engine/go.mod services/import-engine/go.sum services/import-engine/
+COPY services/control-plane/go.mod services/control-plane/go.sum services/control-plane/
+RUN cd services/control-plane && go mod download
+COPY services/import-engine/ services/import-engine/
+COPY services/control-plane/ services/control-plane/
+RUN cd services/control-plane && \
+    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/import-worker ./cmd/import-worker
+
+FROM ${RUNTIME_IMAGE}
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl ca-certificates && \
+    install -d /usr/share/postgresql-common/pgdg && \
+    curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+      -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc && \
+    echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" \
+      > /etc/apt/sources.list.d/pgdg.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends postgresql-client-17 && \
+    apt-get purge -y curl && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
+COPY --from=build /out/import-worker /import-worker
+USER 65532:65532
+EXPOSE 8082
+ENTRYPOINT ["/import-worker"]
