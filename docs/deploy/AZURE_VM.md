@@ -124,7 +124,53 @@ kubectl -n nimbusdb-platform scale deploy/nimbus-hosting --replicas=1
 # → https://hosting.db.zaleit.com.au
 ```
 
-## 6. Day-2 basics
+## 6. Capacity & sizing — read this before worrying about "90%"
+
+**Kubernetes "requests" are reservations, not usage.** `kubectl describe node` shows the sum of
+what pods *reserve* for scheduling; an idle platform actually consumes a few percent CPU. A node
+at "90% requests" with low real load isn't overloaded — it just has no *reservation* headroom
+left, so the next pod can't schedule (`Pending: Insufficient cpu`). Check real usage with `htop`
+/ `free -h` on the VM (metrics-server is deliberately disabled — ADR-022 — so `kubectl top`
+doesn't work; it cost 100m of reservation to tell us what htop tells us for free).
+
+The platform ships the **single-node profile** (ADR-022) by default in this runbook's bootstrap:
+
+| Reservation | CPU | Memory |
+|---|---|---|
+| Platform pods (api, console, reconciler, import-worker, gateway, MinIO, control-plane PG) | ~675m | ~2.4Gi |
+| System (coredns, CNPG operator, cert-manager, Traefik) | ~200m | ~0.4Gi |
+| **Idle total** | **~875m** | **~2.8Gi** |
+| Each **ready** 0.25-CU tenant branch (burstable CPU, guaranteed memory) | +62m | +1Gi |
+| Each **suspended** branch | +0 | +0 |
+
+The profile also means: tenant clusters are **1 instance** (a same-host replica shares the failure
+domain — it buys zero availability, so ADR-019's HA rendering is intentionally off here; a read
+replica endpoint still gets its standby because reads need one), poolers run 1 replica, and
+tenant CPU is burstable (reserve ¼ CU, burst to the full CU).
+
+**Fit guide:** `B2as_v2` (2 vCPU / 8 GiB, ~US$58/mo) comfortably runs the platform + Nimbus
+Hosting + ~4–5 concurrently-active small branches (memory-bound) with more suspended.
+`B4as_v2` doubles both budgets — choose it when several branches are busy at once.
+
+## 7. Troubleshooting
+
+- **Pod `Pending` with `Insufficient cpu`** — reservation headroom, not load. See §6. Find the
+  spender with `kubectl describe node | grep -A10 'Allocated resources'` and
+  `kubectl get pods -A -o custom-columns='NS:.metadata.namespace,POD:.metadata.name,REQ:.spec.containers[*].resources.requests.cpu'`.
+  Suspending idle branches releases their reservations immediately.
+- **`ImagePullBackOff` right after an upgrade** — usually a stale ReplicaSet pulling an image tag
+  that doesn't exist yet (e.g. immediately after a rename, before the GH Actions release run
+  finished). `kubectl -n <ns> rollout restart deploy/<name>` once the images exist; the gateway
+  uses `Recreate` strategy so it can never wedge behind a Pending replacement.
+- **Gateway rollout stuck (pre-ADR-022 installs)** — the deployment now ships
+  `strategy: Recreate`; re-running `bootstrap.sh` applies it.
+- **Copying `secrets.env` off the VM** — run this **on your local machine** (not on the server):
+  `scp -i <your-key.pem> ndb@<VM_IP>:/tmp/secrets.env .` after
+  `sudo cp /etc/nimbusdb/secrets.env /tmp/ && sudo chown ndb /tmp/secrets.env` on the VM
+  (and `rm /tmp/secrets.env` afterwards). Running `ssh`/`scp` *from* the VM to itself times out
+  on the public IP because the NSG restricts port 22 to your home IP.
+
+## 8. Day-2 basics
 
 - **Upgrades:** `git -C /opt/nimbusdb pull && deploy/vm/bootstrap.sh` re-applies manifests;
   `kubectl rollout restart deploy -n nimbusdb-platform` pulls fresh `:latest` images.

@@ -2,6 +2,33 @@
 
 All notable changes to this repository. Format loosely follows [Keep a Changelog](https://keepachangelog.com/); one entry per phase gate plus notable intermediate merges.
 
+## [Deploy — single-node capacity profile (ADR-022)] — 2026-07-23
+
+The first real VM (2 vCPU) hit `Pending: Insufficient cpu` at 90% CPU **requests** while nearly
+idle — reservations, not usage. Fixed structurally, not by hand-patching.
+
+### Added
+- **`NDB_SINGLE_NODE=true`** (reconciler; selfhost bootstrap sets it): production role no longer
+  forces 2 instances (same-host replica = same failure domain — zero availability gain; a read
+  endpoint still gets its standby), poolers run 1 replica, and tenant CPU is **burstable**
+  (request = CU/4, limit = full CU; a ready 0.25-CU branch reserves 62m instead of 250m).
+  **Memory stays guaranteed** — CPU throttles, memory OOMs. Off-profile behavior byte-identical
+  (existing suites prove it); new tests cover the profile.
+- Platform manifests right-sized: total platform requests **~1500m → ~675m** (api/reconciler 50m,
+  import-worker 25m, console/gateway/minio 100m, control-plane PG 250m). Gateway Deployment ships
+  **`strategy: Recreate`** (single node: rolling updates wedge without reservation headroom).
+- Bootstrap disables **metrics-server** (no HPA; 100m reservation saved) incl. migration for
+  existing installs, and bounces the reconciler on re-runs so env changes take effect.
+- Runbook: **Capacity & sizing** (requests-vs-usage explainer + budget table: idle ≈ 875m/2.8Gi;
+  B2as_v2 fits platform + Nimbus Hosting + ~4–5 active small branches) and **Troubleshooting**
+  (Pending/Insufficient cpu, ImagePullBackOff after image renames, secrets.env copy done right).
+
+### Notes
+- Already true before this change (kept): no Temporal/NATS/observability stack/mesh/sidecars;
+  single-binary Go gateway; transaction pooling; scale-to-zero; replicas on demand.
+- Backlog (ADR-022): cold-archival of ≥30-day-idle branches (PVC → object storage) — suspended
+  branches already cost zero CPU/RAM; only the 5Gi PVC remains.
+
 ## [Rebrand — Zale DB on db.zaleit.com.au (ADR-021)] — 2026-07-20
 
 The product is now **Zale DB**, hosted at **db.zaleit.com.au**.

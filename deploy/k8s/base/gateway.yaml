@@ -21,6 +21,12 @@ metadata:
   namespace: nimbusdb-gateway
 spec:
   replicas: 1
+  strategy:
+    # Single-node profile (ADR-022): a rolling update needs headroom for a
+    # second pod that a small VM may not have — the replacement then sits
+    # Pending on "Insufficient cpu" while the old pod keeps the deployment
+    # wedged. Recreate trades a brief connect blip for guaranteed progress.
+    type: Recreate
   selector:
     matchLabels: { app: pg-gateway }
   template:
@@ -61,7 +67,7 @@ spec:
               mountPath: /etc/pg-gateway/tls
               readOnly: true
           resources:
-            requests: { cpu: 250m, memory: 256Mi }
+            requests: { cpu: 100m, memory: 128Mi }
       volumes:
         - name: routes
           configMap: { name: pg-gateway-routes }

@@ -37,6 +37,12 @@ func main() {
 		os.Exit(1)
 	}
 	domain.SetBaseDomain(cfg.Domain)
+	// Single-node capacity profile (ADR-022): no same-host HA, burstable
+	// tenant CPU. The selfhost bootstrap sets this; multi-node leaves it off.
+	if os.Getenv("NDB_SINGLE_NODE") == "true" {
+		reconciler.SetSingleNode(true)
+		log.Info("single-node capacity profile enabled (ADR-022)")
+	}
 	interval := 10 * time.Second
 	if v := os.Getenv("NDB_RECONCILE_INTERVAL"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {

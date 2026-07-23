@@ -322,6 +322,31 @@ old names — records describe the past.
 GHCR `nimbusdb-*` packages linger unused. ADR-001's product-naming decision is superseded by this
 ADR for the name itself; everything else in ADR-001 stands.
 
+## ADR-022 · Single-node capacity profile: no same-host HA, burstable tenant CPU, right-sized platform reservations — `accepted`
+**Context:** the first real deployment (Azure `B2as_v2`, 2 vCPU) hit `Pending: Insufficient cpu`
+at 90% CPU *requests* while actual usage was near-idle — the deploy kit's reservations were tuned
+for the 4-vCPU size, and Kubernetes schedules on reservations, not usage. Two structural
+observations follow for any one-VM cluster: (a) a second Postgres instance on the same host
+shares the failure domain — ADR-019's HA rendering buys **zero availability** there while
+doubling the largest reservations; (b) guaranteed-CPU tenant pods exhaust the scheduler long
+before the actual CPU.
+**Decision:** a **single-node profile**, enabled by `NDB_SINGLE_NODE=true` on the reconciler
+(the selfhost bootstrap sets it): production role alone no longer forces 2 instances (a read
+endpoint still does — the standby is functionally required to serve reads); poolers run 1
+replica; tenant CPU goes **burstable** (request = CU/4, limit = full CU) while **memory stays
+guaranteed** (CPU throttles gracefully under contention, memory OOMs). Alongside: platform
+manifests right-sized (~1500m → ~675m total requests), metrics-server disabled in k3s (no HPA —
+100m reservation for data `htop` gives free), and the gateway Deployment uses `Recreate` (a
+rolling update needs headroom a small VM may not have; a brief blip beats a wedged rollout).
+**Alternatives:** dropping Kubernetes for a process manager (rejected — the reconciler *is* a
+k8s controller; weeks of rewrite to save ~300MB); disabling Traefik/servicelb (rejected — both
+are load-bearing: HTTP ingress and the gateway's :5432); accepting 2-instance "HA" on one VM
+(rejected — pure cost, no benefit).
+**Consequences:** off-profile (multi-node) behavior is byte-identical — ADR-019 stands for real
+substrates; the profile is one boot-time switch to turn off when the platform moves to the cloud
+profile. Backlog noted: cold-archival of long-idle branches (PVC → object storage) — suspended
+branches already release all CPU/RAM, so only the 5Gi PVC remains as idle cost.
+
 ---
 
 ## Open questions — **all answered by owner, 2026-07-17**

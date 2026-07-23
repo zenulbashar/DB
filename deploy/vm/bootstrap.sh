@@ -30,11 +30,26 @@ source "$SECRETS"
 NDB_REGION="${NDB_REGION:-syd1}"
 
 say "1/6 k3s (channel $K3S_CHANNEL)"
+# ADR-022: metrics-server is ~100m CPU request + RAM we never use (no HPA);
+# on a small VM that reservation matters. Config must exist before install.
+mkdir -p /etc/rancher/k3s
+if [ ! -f /etc/rancher/k3s/config.yaml ] || ! grep -q metrics-server /etc/rancher/k3s/config.yaml; then
+  cat >> /etc/rancher/k3s/config.yaml <<'EOF'
+disable:
+  - metrics-server
+EOF
+  RESTART_K3S=1
+fi
 if ! command -v kubectl >/dev/null 2>&1 || ! systemctl is-active --quiet k3s; then
   curl -sfL https://get.k3s.io | INSTALL_K3S_CHANNEL="$K3S_CHANNEL" sh -
+elif [ "${RESTART_K3S:-}" = 1 ]; then
+  say "restarting k3s to apply metrics-server disable (existing install)"
+  systemctl restart k3s
 fi
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 kubectl wait --for=condition=Ready node --all --timeout=120s
+# Clean up a metrics-server left behind by a pre-ADR-022 install.
+kubectl -n kube-system delete deploy metrics-server --ignore-not-found >/dev/null 2>&1 || true
 
 say "2/6 cert-manager $CERT_MANAGER_VERSION + CNPG $CNPG_VERSION"
 kubectl apply -f "https://github.com/cert-manager/cert-manager/releases/download/${CERT_MANAGER_VERSION}/cert-manager.yaml"
@@ -83,7 +98,8 @@ apply_secret ndb-reconciler-env -n nimbusdb-platform \
   --from-literal=NDB_BACKUP_ENDPOINT_URL="http://minio.minio.svc:9000" \
   --from-literal=NDB_BACKUP_CREDENTIALS_SECRET=ndb-backup-credentials \
   --from-literal=NDB_BACKUP_CREDENTIALS_NAMESPACE=nimbusdb-platform \
-  --from-literal=NDB_VERIFY_INTERVAL=24h
+  --from-literal=NDB_VERIFY_INTERVAL=24h \
+  --from-literal=NDB_SINGLE_NODE=true
 apply_secret ndb-import-worker-env -n nimbusdb-platform \
   --from-literal=DATABASE_URL="$DATABASE_URL" \
   --from-literal=NDB_KEKS="$NDB_KEKS" \
@@ -176,6 +192,9 @@ done
 say "5/6 apply platform"
 kubectl apply -k "$REPO_ROOT/deploy/k8s/overlays/selfhost"
 kubectl apply -f "$GENERATED"
+# envFrom secrets don't hot-reload; bounce the reconciler so env changes
+# (e.g. NDB_SINGLE_NODE) take effect on re-runs.
+kubectl -n nimbusdb-platform rollout restart deploy/ndb-reconciler >/dev/null 2>&1 || true
 
 say "6/6 wait + summary"
 kubectl -n nimbusdb-platform rollout status deploy/ndb-api --timeout=300s || true
